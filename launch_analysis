@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -eo pipefail
+shopt -s nullglob globstar
+
+cd experiments_results_figures/
+
+python analysis.py \
+            --datasetdir="$DATASETDIR" \
+            --dir_experiment="$DIR_EXPERIMENT" \
+            --run=$RUN \
