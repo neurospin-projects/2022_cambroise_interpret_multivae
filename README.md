@@ -1,7 +1,21 @@
-# MoPoE-VAE
-This is the official code for the ISBI 2023 "blabla".
+![Pep8](https://github.com/neurospin-projects/2022_cambroise_interpret_multivae/actions/workflows/pep8.yml/badge.svg)
 
-If you have any questions about the code or the paper, we are happy to help!
+
+# Mixture-of-Products-of-Experts (MoPoE) VAE 
+
+\:+1: If you are using the code please add a star to the repository :+1:
+
+The availability of multiple data types provides a rich source of information
+and holds promise for learning representations that generalize well across
+multiple modalities. Multimodal data naturally grants additional
+self-supervision in the form of shared information connecting the
+different data types. Further, the understanding of different modalities and
+the interplaybetween data types are non-trivial research questions and
+long-standing goals in machine learning research.
+
+This is the official code for the ISBI 2023.
+If you have any question about the code or the paper, we are happy to help!
+
 
 ## Preliminaries
 
@@ -12,48 +26,65 @@ This code was developed and tested with:
 - The conda environment defined in `environment.yml`
 
 First, set up the conda enviroment as follows:
-```bash
-conda env create -f environment.yml  # create conda env
-conda activate mopoe                 # activate conda env
+
 ```
+conda env create -f environment.yml
+conda activate mopoe
+```
+
 or install the requirements in your own environment. 
 
-In order to be able to run the experiments, you need to have access to HBN or EUAIMS data. Then, you must provide each script with some paths :
-```
---datasetdir 
-```
-is the path to the folder that contains the data. It must contain at least 5 files :
-- rois_data.npy, an array with 2 dimensions, the first corresponding to the subjects, the second to the different metric for each roi
-- rois_subjects.npy, the list of subjects with the same ordering as in the previous file
-- roi_names.npy, the list of feature names for the "roi_data" file, with the same ordering as its columns
-- clinical_data.npy, an array with 2 dimensions, the first corresponding to the subjects, the second to the different score values
-- clinical_subjects.npy, the list of subjects with the same ordering as in the previous file
-- clinical_names.npy, the list of feature names for the "clinical_data" file, with the same ordering as its columns
-- metadata.tsv, a table containing the metadata. It must contain at east 4 columns:
-    "participant_id" with the id of the subjects, corresponding to the "_subjects" files.
-    "sex" with numerically encoded sex
-    "age" with continuous age
-    "site" with acquisition site names
-    for eauims, it can be good to have "asd" containing the 1-2 encoded diagnosis values (for the histogram)
+In order to be able to run the experiments, you need to have access to HBN or
+EUAIMS data. Then, you must provide each script the path to these data setting
+the `--dataset` and `--datasetdir` parameters.
+The data folder must contains at least 5 files:
+- **rois_data.npy**: an array with 2 dimensions, the first corresponding to
+  the subjects, the second to the different metric for each ROI.
+- **rois_subjects.npy**: the list of subjects with the same ordering as
+  in the previous file.
+- **roi_names.npy**: the list of feature names for the `roi_data` file, with
+  the same ordering as its columns.
+- **clinical_data.npy**: an array with 2 dimensions, the first corresponding
+  to the subjects, the second to the different score values.
+- **clinical_subjects.npy**: the list of subjects with the same ordering as
+  in the previous file.
+- **clinical_names.npy** the list of feature names for the `clinical_data`
+  file, with the same ordering as its columns.
+- **metadata.tsv**: a table containing the metadata. It must contain at least
+  4 columns: `participant_id` with the id of the subjects, corresponding
+  to the `_subjects` files, `sex` with numerically encoded sex, `age` with
+  continuous age, and `site` with acquisition site names. In EUAIMS, it can
+  be good to have `asd` containing the 1-2 encoded diagnosis values (for the
+  histogram).
+
 
 ## Experiments
 
-Experiments can be started by running the scripts. 
 To choose between running the MVAE, MMVAE, and MoPoE-VAE, one needs to
-change the script's `METHOD` variabe to "poe", "moe", or "joint\_elbo"
-respectively.  By default, each experiment uses `METHOD="joint_elbo"`.
+change the script's `--method` variabe to `poe`, `moe`, or `joint_elbo`
+respectively. By default, `joint_elbo` is selected.
 
-### training the model
-```bash
-DATASET="$DATASET" DIR_EXPERIMENT="$DIR_EXPERIMENT" DATASETDIR="$DATASETDIR" ./train_mopoe
+
+Perform the proposed Digital Avatars Aanalysis (DAA) on EUAIMS by running
+the following commands in a shell:
+
+```
+export DATASETDIR=/path/to/my/dataset
+export OUTDIR=/path/to/the/output/directory
+
+cd mopoe
+
+./mopoe isbi23-train --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR
+./mopoe daa --datasetdir $DATASETDIR --outdir $OUTDIR --run
+./mopoe plotting --datasetdir $DATASETDIR --outdir $OUTDIR --run
 ```
 
-### running analysis
-```bash
-RUN="$RUN_NAME" DIR_EXPERIMENT="$DIR_EXPERIMENT" DATASETDIR="$DATASETDIR" ./launch_analysis
-```
+Citation
+========
 
-### create figures
-```bash
-RUN="$RUN_NAME" DIR_EXPERIMENT="$DIR_EXPERIMENT" DATASETDIR="$DATASETDIR" ./create_figures
-```
+There is no paper published yet about this project.
+This works is dervived from the following papers:
+
+Thomas M. Sutter, Imant Daunhawer, Julia E Vogt (2021).
+[Generalized Multimodal ELBO](https://openreview.net/pdf?id=5Y21V0RDBV). ICLR.
+
