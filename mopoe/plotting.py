@@ -1,8 +1,86 @@
+# -*- coding: utf-8 -*-
+##########################################################################
+# NSAp - Copyright (C) CEA, 2022
+# Distributed under the terms of the CeCILL-B license, as published by
+# the CEA-CNRS-INRIA. Refer to the LICENSE file or to
+# http://www.cecill.info/licences/Licence_CeCILL-B_V1-en.html
+# for details.
+##########################################################################
+
+"""
+Plotting utility functions.
+"""
+
+# Imports
 import os
-
 import torch
-
+import numpy as np
+from tqdm import tqdm
+import seaborn as sns
+import matplotlib.pyplot as plt
 from utils import plot
+from color_utils import print_result
+import nilearn.plotting as plotting
+
+
+def plot_surf_mosaic(data, titles, fsaverage, filename, label=True):
+    n_plots = len(data)
+    fig = plt.figure(figsize=(10, 50))
+    subfigs = fig.subfigures(nrows=n_plots, ncols=1)
+    for idx in tqdm(range(n_plots)):
+        subfig = subfigs[idx]
+        subfig.suptitle(f"{titles[idx]}")
+        axs = subfig.subplots(nrows=1, ncols=4,
+                              subplot_kw={"projection": "3d"})
+        for ax in axs:
+            ax.axis("off")
+        textures = data[idx]
+        for hidx, hemi in enumerate(("left", "right")):
+            if label:
+                plotting.plot_surf_roi(
+                    fsaverage[f"infl_{hemi}"], roi_map=textures[0], hemi=hemi,
+                    view="lateral", bg_map=fsaverage[f"sulc_{hemi}"],
+                    bg_on_data=True, darkness=.5, axes=axs[hidx * 2])
+                plotting.plot_surf_roi(
+                    fsaverage[f"infl_{hemi}"], roi_map=textures[1], hemi=hemi,
+                    view="medial", bg_map=fsaverage[f"sulc_{hemi}"],
+                    bg_on_data=True, darkness=.5, axes=axs[hidx * 2 + 1])
+            else:
+                plotting.plot_surf_stat_map(
+                    fsaverage[f"infl_{hemi}"], stat_map=textures[0], hemi=hemi,
+                    view="medial", bg_map=fsaverage[f"sulc_{hemi}"],
+                    bg_on_data=True, darkness=.5, cmap="jet", colorbar=False,
+                    axes=axs[hidx * 2])
+                plotting.plot_surf_stat_map(
+                    fsaverage[f"infl_{hemi}"], stat_map=textures[1], hemi=hemi,
+                    view="lateral", bg_map=fsaverage[f"sulc_{hemi}"],
+                    bg_on_data=True, darkness=.5, cmap="jet", colorbar=False,
+                    axes=axs[hidx * 2 + 1])
+    plt.subplots_adjust(left=0.02, bottom=0.02, right=0.98, top=0.98,
+                        wspace=0.02, hspace=0.02)
+    plt.savefig(filename)
+    print_result(f"surface mosaic: {filename}")
+
+
+def plot_mosaic(images, filename, n_cols=8, image_size=(28, 28), scaler=None):
+    n_images = len(images)
+    if scaler is not None:
+        images = scaler.inverse_transform(images.reshape(n_images, -1))
+        images = images.reshape(n_images, *image_size)
+    n_rows = n_images // n_cols
+    if n_images % n_cols != 0:
+        n_rows += 1
+    arr = np.zeros((image_size[0] * n_rows, image_size[1] * n_cols))
+    for idx, _arr in enumerate(images):
+        j = idx % n_cols
+        i = idx // n_cols
+        arr[i * image_size[0]: (i + 1) * image_size[0],
+            j * image_size[1]: (j + 1) * image_size[1]] = _arr
+    plt.figure(figsize=(10, 10))
+    plt.axis("off")
+    plt.imshow(arr, cmap="Greys_r")
+    plt.savefig(filename)
+    print_result(f"mosaic: {filename}")
 
 
 def generate_plots(exp, epoch):

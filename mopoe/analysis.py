@@ -7,23 +7,26 @@
 # for details.
 ##########################################################################
 
+"""
+Perofrm the Digital Avatars Analysis (DAA).
+"""
+
+# Imports
 import os
 import pickle
-
+import numpy as np
+import statsmodels.api as sm
+from scipy.stats import kendalltau
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from torch.autograd import Variable
-
-import numpy as np
+from multimodal_cohort.dataset import DataManager, MissingModalitySampler
 from argparse import ArgumentParser
 
-import statsmodels.api as sm
-from scipy.stats import kendalltau
 
-from multimodal_cohort.dataset import DataManager, MissingModalitySampler
-
-
+# Define command line arguments
+# ToDo: add the code in the workflow directly.
 parser = ArgumentParser()
 parser.add_argument("--run", type=str)
 parser.add_argument("--datasetdir", type=str)

@@ -13,6 +13,7 @@ from multimodal_cohort.experiment import MultimodalExperiment
 
 if __name__ == '__main__':
     FLAGS = parser.parse_args()
+    import ipdb; ipdb.set_trace()
     use_cuda = torch.cuda.is_available()
     FLAGS.device = torch.device('cuda' if use_cuda else 'cpu')
     if FLAGS.method == 'poe':

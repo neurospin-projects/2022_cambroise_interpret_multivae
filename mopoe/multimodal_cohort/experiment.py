@@ -1,3 +1,4 @@
+import json
 import random
 import numpy as np 
 
@@ -31,7 +32,7 @@ class MultimodalExperiment(BaseExperiment):
         # self.plot_img_size = torch.Size((3, 28, 28))
         # self.font = ImageFont.truetype('FreeSerif.ttf', 38)
         self.flags.num_features = len(alphabet)
-        print(self.num_modalities)
+        print("number of modalities:", self.num_modalities)
 
         self.modalities = self.set_modalities()
         self.subsets = self.set_subsets()
@@ -47,6 +48,16 @@ class MultimodalExperiment(BaseExperiment):
         self.eval_metric = accuracy_score
         self.paths_fid = self.set_paths_fid()
         self.labels = ['ASD']
+
+    @classmethod
+    def get_experiment(cls, flags_file, alphabet_file, checkpoint_file):
+        flags = torch.load(flags_file)
+        with open(alphabet_file, "rt") as of:
+            alphabet = str("".join(json.load(of)))
+        experiment = MultimodalExperiment(flags, alphabet)
+        checkpoint = torch.load(checkpoint_file)
+        experiment.mm_vae.load_state_dict(checkpoint)
+        return experiment, flags
 
     def set_model(self):
         model = VAE(self.flags, self.modalities, self.subsets)
@@ -78,7 +89,7 @@ class MultimodalExperiment(BaseExperiment):
 
     def set_dataset(self):
         manager = DataManager(self.flags.dataset, self.flags.datasetdir, 
-                              list(self.modalities), overwrite=True,
+                              list(self.modalities), overwrite=False,
                               allow_missing_blocks=self.flags.allow_missing_blocks)
         self.set_scalers(manager.train_dataset)
         self.transform = {mod: transforms.Compose([
@@ -95,8 +106,8 @@ class MultimodalExperiment(BaseExperiment):
                                  on_the_fly_transform=self.transform)
         self.dataset_train = train
         self.dataset_test = test
-        print(len(train))
-        print(len(test))
+        print("number of subjects in trainset:", len(train))
+        print("number of subjects in testset:", len(test))
 
     def set_optimizer(self):
         # optimizer definition
@@ -129,7 +140,7 @@ class MultimodalExperiment(BaseExperiment):
         samples = []
         for i in range(num_images):
             ix = random.randint(0, n_test-1)
-            sample, _ = self.dataset_test[ix]
+            sample, _, _ = self.dataset_test[ix]
             for key in sample.keys():
                 if sample[key] is not None:
                     sample[key] = torch.tensor(sample[key]).to(self.flags.device)

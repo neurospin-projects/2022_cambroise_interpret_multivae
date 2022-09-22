@@ -18,7 +18,10 @@ import workflow as wf
 
 
 fire.Fire({
-    "isbi23-train": wf.isbi23_train,
-    "daa": wf.daa,
-    "plotting": wf.plotting
+    "train": wf.train_exp,
+    "daa": wf.daa_exp,
+    "daa-plot": wf.daa_plot_exp,
+    "rsa": wf.rsa_exp,
+    "rsa-plot": wf.rsa_plot_exp,
+    "hist-plot": wf.hist_plot_exp
 })

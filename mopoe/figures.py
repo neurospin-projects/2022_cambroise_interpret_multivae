@@ -224,7 +224,7 @@ for metric in metrics:
             fig.suptitle("Average influence of {} on {}".format(score, metric))
             plt.savefig(os.path.join(path_to_save_fig, "{}_on_{}".format(score, metric)))
         
-#################################### Most linked brain areas across scores
+#################################### Most linked brain areas across scores (radar) - plot areas petit brain
 
 clinical_names = [name.replace("t1", "").replace("_", " ").strip() for name in clinical_names]
 plotting_clinical_names = {
@@ -323,7 +323,7 @@ for metric in metrics:
         )
     fig.show()
 
-############################# Meaningful associations plot
+############################# Meaningful associations plot (flow)
 
 for metric in metrics:
     sorted_scores = [plotting_clinical_names[name_dataset_train][clinical_names[source_idx]] for source_idx in np.array(sources_per_metric[metric])]

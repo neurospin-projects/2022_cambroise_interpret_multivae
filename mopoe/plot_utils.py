@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from nilearn import plotting, datasets
 import plotly.express as px
 
+
 def plot_latent_representations(representations, phenotypes, stratification_column, continuous,
                                 channel_name, supp_labels=None, supp_labels_names=None,
                                 n_dims=3, cmap_name='plasma'):
@@ -113,12 +114,14 @@ def nilearn_labels_to_feature_names_with_metric(labels, metric):
     rh_features = ["{}_rh_{}".format(item, metric) for item in features]
     return lh_features, rh_features
 
+
 def nilearn_labels_to_feature_names(labels):
     features = [label.decode().replace("_and_", "&")
                 for label in labels]
     lh_features = ["{}_lh".format(item) for item in features]
     rh_features = ["{}_rh".format(item) for item in features]
     return lh_features, rh_features
+
 
 def plot_surf(data, metric):
     destrieux = datasets.fetch_atlas_surf_destrieux()    
@@ -171,6 +174,7 @@ def plot_surf(data, metric):
         vmax=vmax, colorbar=True, hemi="right", view="medial", axes=axs[1, 1],
         alpha=0.1)
     return fig
+
 
 def plot_areas(areas, colors):
     destrieux = datasets.fetch_atlas_surf_destrieux()    

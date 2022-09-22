@@ -119,7 +119,7 @@ def save_and_log_flags(flags):
     str_args = '';
     for k, key in enumerate(sorted(flags.__dict__.keys())):
         str_args = str_args + '\n' + key + ': ' + str(flags.__dict__[key]);
-    return str_args;
+    return str_args
 
 
 class Flatten(torch.nn.Module):

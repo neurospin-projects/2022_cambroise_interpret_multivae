@@ -69,14 +69,24 @@ Perform the proposed Digital Avatars Aanalysis (DAA) on EUAIMS by running
 the following commands in a shell:
 
 ```
+cd mopoe
 export DATASETDIR=/path/to/my/dataset
 export OUTDIR=/path/to/the/output/directory
 
-cd mopoe
+./mopoe train --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR
+--latent_dim 20 --input_dims 7,444 --beta 5 --batch_size 256
+--likelihood normal --initial_learning_rate 0.002 --n_epochs 50
+--learn_output_scale --allow_missing_blocks
 
-./mopoe isbi23-train --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR
-./mopoe daa --datasetdir $DATASETDIR --outdir $OUTDIR --run
-./mopoe plotting --datasetdir $DATASETDIR --outdir $OUTDIR --run
+export RUN=my_run_id
+
+./mopoe daa --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
+./mopoe rse --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
+
+./mopoe daa-plot --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
+./mopoe rsa-plot --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
+./mopoe hist-plot --datasets hbn,euaims --datasetdirs $DATASETDIR1,$DATASETDIR2
+--scores SRS_Total,t1_srs_rawscore --outdir $OUTDIR
 ```
 
 Citation

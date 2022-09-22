@@ -70,7 +70,7 @@ class MultimodalDataset(torch.utils.data.Dataset):
         self.data = {}
         for mod in self.modalities:
             mod_path = data_path.replace("multiblock", mod)
-            self.data[mod] = np.load(mod_path, mmap_mode="r+")
+            self.data[mod] = np.load(mod_path, mmap_mode="r")
         self.on_the_fly_transform = on_the_fly_transform
         self.on_the_fly_inter_transform = on_the_fly_inter_transform
 
@@ -82,11 +82,11 @@ class MultimodalDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         if self.indices is not None:
             idx = self.indices[idx]
-        idx_per_mod = {
-            mod: self.idx_per_mod[mod][idx] for mod in self.modalities}
-        ret = {
-            mod: self.data[mod][int(idx_per_mod[mod])]
-            for mod in self.modalities if idx_per_mod[mod] is not None}
+        ret = {}
+        for mod in self.modalities:
+            _idx = self.idx_per_mod[mod][idx]
+            if _idx is not None:
+                ret[mod] = self.data[mod][int(_idx)]
         if self.metadata is not None:
             ret["metadata"] = self.metadata.iloc[idx].to_dict()
         ret["index"] = idx
