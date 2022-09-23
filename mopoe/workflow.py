@@ -15,6 +15,7 @@ Define the different workflows used during the analysis.
 import os
 import glob
 import json
+import collections
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -99,7 +100,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, latent_dim=20,
         joint_elbo=False, kl_annealing=0, include_prior_expert=False,
         learn_output_scale=learn_output_scale, len_sequence=8,
         likelihood=likelihood, load_saved=False, method='joint_elbo',
-        mm_vae_save='mm_vae', modality_jsd=False, modality_moe=False,
+        mm_vae_save="mm_vae", modality_jsd=False, modality_moe=False,
         modality_poe=False, num_channels_m1=1, num_channels_m2=3,
         num_classes=2, num_hidden_layers=num_hidden_layers,
         num_samples_fid=10000, num_training_samples_lr=500,
@@ -165,7 +166,8 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
     n_discretization_steps: int, default 200
         the size of each traverse.
     n_samples: int, default 50
-        the number of perturbed samples for each clinical score.
+        the number of perturbed samples for each clinical score (keep only
+        subjects with no missing data).
     k: int, default 1000
         estimate the distribution per clinical scores from k Normal
         distributions.
@@ -653,16 +655,72 @@ def daa_plot_exp(dataset, datasetdir, outdir, run):
                if os.path.isdir(path)]
     print_text(f"Simulation directories: {','.join(simdirs)}")
 
-    print_subtitle(f"Plot significant ROIs per score...")
     destrieux_atlas = datasets.fetch_atlas_surf_destrieux(data_dir=expdir)
     destrieux_labels = [label.decode().replace("_and_", "&")
                         for label in destrieux_atlas["labels"]]
     fsaverage = datasets.fetch_surf_fsaverage(data_dir=expdir)
-    titles = []
+    clinical_names = np.load(
+        os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
+    clinical_names = clinical_names.tolist()
+    rois_names = np.load(
+        os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
+    rois_names = rois_names.tolist()
     for dirname in simdirs:
         df = pd.read_csv(os.path.join(dirname, "significant_rois.tsv"),
                          sep="\t")
-        data = []
+        coefs = np.load(os.path.join(dirname, "coefs.npy"))
+
+        print_subtitle(f"Plot regression coefficients radar plots...")
+        counts = collections.Counter(df["roi"].values)
+        selected_rois = [item[0] for item in counts.most_common(3)]
+        selected_roi_indices = {"left": [], "right": []}
+        for name in selected_rois:
+            roi_name, hemi = name.rsplit("_", 1)
+            hemi = "left" if hemi == "lh" else "right"
+            selected_roi_indices[hemi].append(destrieux_labels.index(roi_name))
+        parcellations = []
+        for hemi, indices in selected_roi_indices.items():
+            _par = destrieux_atlas[f"map_{hemi}"]
+            parcellations.append(np.isin(_par, indices).astype(int))
+        filename = os.path.join(dirname, "three_selected_rois.png")
+        plot_surf_mosaic([parcellations], [" - ".join(selected_rois)],
+                         fsaverage, filename, label=True)
+        for _metric, _df in df.groupby(["metric"]):
+            selected_scores = []
+            for _roi in selected_rois:
+                roi_idx = rois_names.index(f"{_roi}_{_metric}")
+                selected_scores.append(coefs[:, :, roi_idx].mean(axis=0))
+            selected_scores = np.asarray(selected_scores)
+            max_score = coefs.max()
+            fig = go.Figure()
+            for roi_idx, _roi in enumerate(selected_rois):
+                _scores = selected_scores[roi_idx].tolist()
+                fig.add_trace(
+                    go.Scatterpolar(
+                        r=_scores + _scores[:1],
+                        theta=[
+                            "<b>" + name + "</b>"
+                            for name in clinical_names + clinical_names[:1]],
+                        mode="lines+text",
+                        legendgroup="roi",
+                        legendgrouptitle = dict(
+                            font=dict(size=30, family="Droid Serif"),
+                            text="<b>ROIs</b>"),
+                        name=_roi))
+            fig.update_layout(
+                polar=dict(
+                    radialaxis=dict(
+                        visible=True, showticklabels=False, ticks="",
+                        range=[0, max_score + 0.003])),
+                font=dict(size=20, family="Droid Serif"))
+            filename = os.path.join(
+                dirname, f"three_selected_rois_{_metric}_polarplots.png")
+            fig.write_image(filename)
+            print_result(f"{_metric} regression coefficients for 3 selected "
+                         f"ROIs: {filename}")
+
+        print_subtitle(f"Plot significant ROIs per score...")
+        data, titles = [], []
         for (_metric, _score), _df in df.groupby(["metric", "score"]):
             roi_indices = {"left": [], "right": []}
             for name in _df["roi"].values:
@@ -678,22 +736,28 @@ def daa_plot_exp(dataset, datasetdir, outdir, run):
         filename = os.path.join(dirname, "significant_rois.png")
         plot_surf_mosaic(data, titles, fsaverage, filename, label=True)
 
-    print_subtitle(f"Plot significant scores/ROIs flows...")
-    for dirname in simdirs:
-        df = pd.read_csv(os.path.join(dirname, "significant_rois.tsv"),
-                         sep="\t")
+        print_subtitle(f"Plot significant scores/ROIs flows...")
         for _metric, _df in df.groupby(["metric"]):
+            significant_scores = _df["score"].values
+            significant_rois = _df["roi"].values
+            significant_coefs = []
+            colors = []
+            for _roi, _score in zip(significant_rois, significant_scores):
+                score_idx = clinical_names.index(_score)
+                roi_idx = rois_names.index(f"{_roi}_{_metric}")
+                significant_coefs.append(coefs[:, score_idx, roi_idx].mean())
+            significant_coefs = np.asarray(significant_coefs)
+            colors = ["rgba(255,0,0,0.4)" if coef > 0 else "rgba(0,0,255,0.4)"
+                      for coef in significant_coefs]
             sankey_plot = go.Parcats(
                 domain={"x": [0.05, 0.9], "y": [0, 1]},
-                dimensions=[{"label": "Score", "values": _df["score"].values},
-                            {"label": "ROI", "values": _df["roi"].values}],
-                #counts=np.array(values_per_metric[metric]),
-                line={'shape': 'hspline'},
-                #line={'color': colors_per_metric[metric], 'shape': 'hspline'},
+                dimensions=[{"label": "Score", "values": significant_scores},
+                            {"label": "ROI", "values": significant_rois}],
+                counts=np.abs(significant_coefs),
+                line={"color": colors, "shape": "hspline"},
                 labelfont=dict(family="Droid Serif", size=28),
                 tickfont=dict(family="Droid Serif", size=20))
             fig = go.Figure(data=[sankey_plot])
             filename = os.path.join(dirname, f"score2roi_{_metric}_flow.png")
             fig.write_image(filename)
             print_result(f"flow for the {_metric} metric: {filename}")
-

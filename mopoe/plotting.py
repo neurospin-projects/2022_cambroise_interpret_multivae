@@ -25,10 +25,14 @@ import nilearn.plotting as plotting
 
 def plot_surf_mosaic(data, titles, fsaverage, filename, label=True):
     n_plots = len(data)
-    fig = plt.figure(figsize=(10, 50))
+    size = n_plots * 10 / 4.
+    fig = plt.figure(figsize=(10, size))
     subfigs = fig.subfigures(nrows=n_plots, ncols=1)
     for idx in tqdm(range(n_plots)):
-        subfig = subfigs[idx]
+        if n_plots == 1:
+            subfig = subfigs
+        else:
+            subfig = subfigs[idx]
         subfig.suptitle(f"{titles[idx]}")
         axs = subfig.subplots(nrows=1, ncols=4,
                               subplot_kw={"projection": "3d"})
