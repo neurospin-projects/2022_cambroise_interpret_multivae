@@ -270,7 +270,7 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
     resdir = os.path.join(daadir, name)
     if not os.path.isdir(resdir):
         os.mkdir(resdir)
-    errors_file = os.path.join(resdir, "rec_erros.npy")
+    errors_file = os.path.join(resdir, "rec_errors.npy")
     scores_file = os.path.join(resdir, "trav_scores.npy")
     trainset = latents.datatrain
     clinical_values = trainset["clinical"].cpu().detach().numpy()
@@ -761,3 +761,105 @@ def daa_plot_exp(dataset, datasetdir, outdir, run):
             filename = os.path.join(dirname, f"score2roi_{_metric}_flow.png")
             fig.write_image(filename)
             print_result(f"flow for the {_metric} metric: {filename}")
+
+
+def avatar_plot_exp(dataset, datasetdir, outdir, run):
+    """ Display specified score histogram across different cohorts.
+
+    Parameters
+    ----------
+    dataset: str
+        the dataset name: euaims or hbn.
+    datasetdir: str
+        the path to the dataset associated data.
+    outdir: str
+        the destination folder.
+    run: str
+        the name of the experiment in the destination folder:
+        `<dataset>_<timestamp>'.
+    """
+    from surfify.utils import text2grid
+    import matplotlib.pyplot as plt
+    import matplotlib.animation as animation
+    from nilearn import datasets
+    from nilearn.surface import load_surf_mesh
+
+    print_title(f"PLOT AVATARS: {dataset}")
+    subject_idx = 0
+    score_idx = 0
+    expdir = os.path.join(outdir, run)
+    daadir = os.path.join(expdir, "daa")
+    print_text(f"experimental directory: {expdir}")
+    print_text(f"DAA directory: {daadir}")
+    simdirs = [path for path in glob.glob(os.path.join(daadir, "*"))
+               if os.path.isdir(path)]
+    print_text(f"Simulation directories: {','.join(simdirs)}")
+
+    destrieux_atlas = datasets.fetch_atlas_surf_destrieux(data_dir=expdir)
+    destrieux_labels = [label.decode().replace("_and_", "&")
+                        for label in destrieux_atlas["labels"]]
+    fsaverage = datasets.fetch_surf_fsaverage(data_dir=expdir)
+    spheres = {
+        "left": load_surf_mesh(fsaverage["sphere_left"])[0],
+        "right": load_surf_mesh(fsaverage["sphere_right"])[0]
+    }
+    clinical_names = np.load(
+        os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
+    clinical_names = clinical_names.tolist()
+    rois_names = np.load(
+        os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
+    rois_names = rois_names.tolist()
+    for dirname in simdirs:
+        avatardir = os.path.join(dirname, "avatar")
+        if not os.path.isdir(avatardir):
+            os.mkdir(avatardir)
+        print_text(f"avatar directory: {avatardir}")
+        errors = np.load(os.path.join(dirname, "rec_errors.npy"))
+        errors = errors.mean(axis=0)
+        traverses = np.load(os.path.join(dirname, "trav_scores.npy"))
+        traverses = traverses.mean(axis=0).transpose(0, 2, 1)
+        n_subjects, n_scores, n_steps = traverses.shape
+        print(f"reconstruction errors: {errors.shape}")
+        print(f"traverses: {traverses.shape}")
+        roi_indices = {"roi": [], "idx": [], "atlas_idx": [], "hemi": [],
+                       "metric": [], "hemi": []}
+        for roi_idx, name in enumerate(rois_names):
+            roi_name, hemi, metric_name = name.rsplit("_", 2)
+            hemi = "left" if hemi == "lh" else "right"
+            roi_indices["hemi"].append(hemi)
+            roi_indices["roi"].append(roi_name)
+            roi_indices["metric"].append(metric_name)
+            roi_indices["idx"].append(roi_idx)
+            roi_indices["atlas_idx"].append(destrieux_labels.index(roi_name))
+        df = pd.DataFrame.from_dict(roi_indices)
+        print(df.groupby(["metric"]).apply(lambda e: e[:]))
+
+        for _metric, _df1 in df.groupby(["metric"]):
+            fig, ax = plt.subplots()
+            plt.axis("off")
+            ims = []
+            vmin = errors[subject_idx, score_idx, :, _df1["idx"].values].min()
+            vmax = errors[subject_idx, score_idx, :, _df1["idx"].values].max()
+            for step_idx in tqdm(range(n_steps)):
+                images = []
+                for _hemi, _df2 in _df1.groupby(["hemi"]):
+                    _par_ref = destrieux_atlas[f"map_{hemi}"]
+                    _par = destrieux_atlas[f"map_{hemi}"].astype(float) * 0.
+                    for roi_idx, atlas_idx in zip(_df2["idx"], _df2["atlas_idx"]):
+                        _par[_par_ref == atlas_idx] = errors[
+                            subject_idx, score_idx, step_idx,  roi_idx]
+                    proj_texture = text2grid(spheres[_hemi], _par)
+                    images.append(proj_texture)
+                view = np.concatenate(images, axis=1)
+                im = ax.imshow(view, vmin=vmin, vmax=vmax, animated=True)
+                if step_idx == 0:
+                    ax.imshow(view)
+                ims.append([im])
+            ani = animation.ArtistAnimation(fig, ims, interval=50, blit=True,
+                                            repeat_delay=1000)
+            writer = animation.FFMpegWriter(fps=15, bitrate=1800)
+            filename = os.path.join(
+                avatardir, 
+                f"sub-{subject_idx}_score-{score_idx}_metric-{_metric}.mp4")
+            ani.save(filename, writer=writer)
+            print_result(f"movie: {filename}")
