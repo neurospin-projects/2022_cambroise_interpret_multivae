@@ -23,7 +23,11 @@ from scipy.spatial.distance import squareform
 def data2cmat(data):
     """ Compute pairwise (dis)similarity matrices.
     """
-    return squareform(pdist(data, metric="euclidean"))
+    if data.ndim > 2:
+        return np.array([squareform(pdist(data[idx], metric="euclidean"))
+                         for idx in range(len(data))])
+    else:
+        return squareform(pdist(data, metric="euclidean"))
 
 
 def cmat2triu(arr):
@@ -49,9 +53,17 @@ def vec2cmat(vec, data_scale="ratio", metric="euclidean"):
     return cmat
 
 
-def fit_rsa(cmat, ref_cmat):
+def fit_rsa(cmat, ref_cmat, idxs=None):
     """ Compare dissimilarity matrix to the matrices for each individual
     characteristic using the Kendall rank correlation coefficient.
     """
-    tau, pval = kendalltau(cmat2triu(cmat), cmat2triu(ref_cmat))
-    return tau, pval
+    if cmat.ndim > 2:
+        r = np.array([
+            kendalltau(cmat2triu(cmat[idx][idxs, :][:, idxs]),
+                       cmat2triu(ref_cmat))[0]
+            for idx in range(10)])
+        r = np.arctan(r)
+        return r
+    else:
+        tau, pval = kendalltau(cmat2triu(cmat), cmat2triu(ref_cmat))
+        return tau, pval

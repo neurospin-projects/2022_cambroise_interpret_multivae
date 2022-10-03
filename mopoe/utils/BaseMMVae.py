@@ -144,7 +144,7 @@ class BaseMMVae(ABC, nn.Module):
         results['group_distr'] = latents['joint'];
         if sample_latents:
             class_embeddings = self.reparameterize(latents['joint'][0],
-                                                    latents['joint'][1]);
+                                                   latents['joint'][1]);
         else:
             class_embeddings = latents['joint'][0]
         div = self.calc_joint_divergence(latents['mus'],

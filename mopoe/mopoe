@@ -24,5 +24,7 @@ fire.Fire({
     "rsa": wf.rsa_exp,
     "rsa-plot": wf.rsa_plot_exp,
     "hist-plot": wf.hist_plot_exp,
-    "avatar-plot": wf.avatar_plot_exp
+    "avatar-plot": wf.avatar_plot_exp,
+    "benchmark-latent": wf.benchmark_latent_exp,
+    "benchmark-rsa": wf.benchmark_rsa_exp
 })

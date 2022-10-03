@@ -22,8 +22,10 @@ from tqdm import tqdm
 import statsmodels.api as sm
 from types import SimpleNamespace
 import torch
+from torch.distributions import Normal
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
+from brainite.models import MCVAE
 from run_epochs import run_epochs
 from multimodal_cohort.flags import parser
 from utils.filehandling import create_dir_structure
@@ -31,7 +33,8 @@ from multimodal_cohort.experiment import MultimodalExperiment
 from multimodal_cohort.dataset import DataManager, MissingModalitySampler
 from stat_utils import data2cmat, vec2cmat, fit_rsa
 from color_utils import (
-    print_title, print_subtitle, print_command, print_text, print_result)
+    print_title, print_subtitle, print_command, print_text, print_result,
+    print_error)
 
 
 def train_exp(dataset, datasetdir, outdir, input_dims, latent_dim=20,
@@ -783,6 +786,7 @@ def avatar_plot_exp(dataset, datasetdir, outdir, run):
     import matplotlib.animation as animation
     from nilearn import datasets
     from nilearn.surface import load_surf_mesh
+    import plotly.graph_objects as go
 
     print_title(f"PLOT AVATARS: {dataset}")
     subject_idx = 0
@@ -835,12 +839,18 @@ def avatar_plot_exp(dataset, datasetdir, outdir, run):
         print(df.groupby(["metric"]).apply(lambda e: e[:]))
 
         for _metric, _df1 in df.groupby(["metric"]):
-            fig, ax = plt.subplots()
+            fig, axs = plt.subplots(1, 2, gridspec_kw={"width_ratios": [1, 10]})
             plt.axis("off")
-            ims = []
+            animate_data = []
             vmin = errors[subject_idx, score_idx, :, _df1["idx"].values].min()
             vmax = errors[subject_idx, score_idx, :, _df1["idx"].values].max()
-            for step_idx in tqdm(range(n_steps)):
+            pertubations = traverses[subject_idx, score_idx]
+            peturbations_order = np.argsort(pertubations)
+            peturbations_vmin = pertubations.min()
+            peturbations_vmax = pertubations.max()
+            tot_range = peturbations_vmax - peturbations_vmin
+            for _idx in tqdm(range(n_steps)):
+                step_idx = peturbations_order[_idx]
                 images = []
                 for _hemi, _df2 in _df1.groupby(["hemi"]):
                     _par_ref = destrieux_atlas[f"map_{hemi}"]
@@ -851,15 +861,309 @@ def avatar_plot_exp(dataset, datasetdir, outdir, run):
                     proj_texture = text2grid(spheres[_hemi], _par)
                     images.append(proj_texture)
                 view = np.concatenate(images, axis=1)
-                im = ax.imshow(view, vmin=vmin, vmax=vmax, animated=True)
-                if step_idx == 0:
-                    ax.imshow(view)
-                ims.append([im])
-            ani = animation.ArtistAnimation(fig, ims, interval=50, blit=True,
-                                            repeat_delay=1000)
+                perturbation = pertubations[step_idx]
+                progress = perturbation - peturbations_vmin
+                animate_data.append([view, progress])
+
+            rectangles = axs[0].bar([0], [tot_range], width=0.1)
+            axs[0].set_ylabel("Score")
+            axs[0].spines["top"].set_visible(False)
+            axs[0].spines["right"].set_visible(False)
+            axs[0].spines["bottom"].set_visible(False)
+            axs[0].set_xticks([])
+            labels = [item.get_text() for item in axs[0].get_yticklabels()]
+            labels[0] = round(peturbations_vmin, 2)
+            labels[-2] = round(peturbations_vmax, 2)
+            axs[0].set_yticklabels(labels)
+            im = axs[1].imshow(animate_data[0][0], vmin=vmin, vmax=vmax,
+                               aspect="equal",  cmap="jet")
+            cbar_ax = fig.add_axes([0.27, 0.2, 0.6, 0.04])
+            fig.colorbar(im, cax=cbar_ax, orientation="horizontal")
+            patches = list(rectangles) + [im]
+
+            def init():
+                rectangles[0].set_height(0)
+                return patches
+
+            def animate(idx):
+                rectangles[0].set_height(animate_data[idx][1])
+                im.set_array(animate_data[idx][0])
+                return patches
+
+            ani = animation.FuncAnimation(fig, animate, init_func=init,
+                                          frames=len(animate_data),
+                                          interval=50, blit=True)
             writer = animation.FFMpegWriter(fps=15, bitrate=1800)
             filename = os.path.join(
                 avatardir, 
                 f"sub-{subject_idx}_score-{score_idx}_metric-{_metric}.mp4")
             ani.save(filename, writer=writer)
             print_result(f"movie: {filename}")
+
+
+def benchmark_latent_exp(dataset, datasetdir, outdir, run,
+                         smcvae_checkpointfile):
+    """ Retrieve the learned latent space of different models using a
+    10 samplings scheme.
+
+    Parameters
+    ----------
+    dataset: str
+        the dataset name: euaims or hbn.
+    datasetdir: str
+        the path to the dataset associated data.
+    outdir: str
+        the destination folder.
+    run: str
+        the name of the experiment in the destination folder:
+        `<dataset>_<timestamp>'.
+    smcvae_checkpointfile: str
+        the path to the sMCVAE model weights.
+    """
+    print_title(f"GET MODELS LATENT VARIABLES: {dataset}")
+    expdir = os.path.join(outdir, run)
+    benchdir = os.path.join(expdir, "benchmark")
+    if not os.path.isdir(benchdir):
+        os.mkdir(benchdir)
+    print_text(f"experimental directory: {expdir}")
+    print_text(f"Benchmark directory: {benchdir}")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    print_subtitle("Loading experiment...")
+    flags_file = os.path.join(expdir, "flags.rar")
+    if not os.path.isfile(flags_file):
+        raise ValueError("You need first to train the model.")
+    alphabet_file = os.path.join(os.getcwd(), "alphabet.json")
+    checkpoints_files = glob.glob(
+        os.path.join(expdir, "checkpoints", "*", "mm_vae"))
+    if len(checkpoints_files) == 0:
+        raise ValueError("You need first to train the model.")
+    checkpoints_files = sorted(
+        checkpoints_files, key=lambda path: int(path.split(os.sep)[-2]))
+    checkpoint_file = checkpoints_files[-1]
+    print_text(f"restoring weights: {checkpoint_file}")
+    experiment, flags = MultimodalExperiment.get_experiment(
+        flags_file, alphabet_file, checkpoint_file)
+
+    print_subtitle("Loading data...")
+    modalities = ["clinical", "rois"]
+    print_text(f"modalities: {modalities}")
+    trainset = experiment.dataset_train
+    print_text(f"train data: {len(trainset)}")
+    testset = experiment.dataset_test
+    print_text(f"test data: {len(testset)}")
+    trainsampler = MissingModalitySampler(trainset, batch_size=len(trainset))
+    trainloader = DataLoader(
+        trainset, batch_sampler=trainsampler, num_workers=0)
+    testsampler = MissingModalitySampler(testset, batch_size=len(testset))
+    testloader = DataLoader(
+        testset, batch_sampler=testsampler, num_workers=0)
+    dataiter = iter(testloader)
+    while True:
+        data, _, meta = dataiter.next()
+        if all([mod in data.keys() for mod in modalities]):
+            break
+    scores = data["clinical"].T
+    clinical_names = np.load(
+        os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
+    clinical_names = [name.replace("t1_", "") for name in clinical_names]
+    for idx, mod in enumerate(modalities):
+        data[mod] = data[mod].to(device).float()
+    print([(key, arr.shape) for key, arr in data.items()])
+    print([(key, arr.shape) for key, arr in meta.items()])
+    meta = dict((key, tensor.numpy()) for key, tensor in meta.items())
+    del meta["participant_id"]
+    meta.update(dict((key, val) for key, val in zip(clinical_names, scores)))
+    meta_df = pd.DataFrame.from_dict(meta)
+    print(meta_df)
+    meta_file = os.path.join(benchdir, f"latent_meta_{dataset}.tsv")
+    meta_df.to_csv(meta_file, sep="\t", index=False)
+    print_result(f"metadata: {meta_file}")
+
+    print_subtitle("Loading models...")
+    models = {}
+    # > MoPoe
+    models["MoPoe"] = experiment.mm_vae
+    # sMCVAE
+    n_channels = len(modalities)
+    n_feats = [data[mod].shape[1] for mod in modalities[::-1]]
+    model = MCVAE(
+        latent_dim=10, n_channels=n_channels, n_feats=n_feats,
+        vae_model="dense", vae_kwargs={}, sparse=True, noise_init_logvar=-3,
+        noise_fixed=False)
+    checkpoint = torch.load(smcvae_checkpointfile,
+                            map_location=torch.device("cpu"))
+    model.load_state_dict(checkpoint["model"])
+    models["sMCVAE"] = model
+    for name, model in models.items():
+        print_text(f"model: {name}")
+        print(model)
+
+    print_subtitle("Evaluate models...")
+    results = {}
+    n_samples = 10
+    for name, model in models.items():
+        print_text(f"model: {name}")
+        model = model.to(device)
+        model.eval()
+        with torch.set_grad_enabled(False):
+            if name == "MoPoe":
+                z_mu, z_logvar = model.inference(data)["joint"]
+                q = Normal(loc=z_mu, scale=torch.exp(0.5 * z_logvar))
+                z_samples = q.sample((n_samples, ))
+                z_samples = z_samples.cpu().detach().numpy()
+                print_text(f"joint latents: {z_samples.shape}")
+                results[f"MoPoe_latents_{dataset}"] = z_samples
+            elif name == "sMCVAE":
+                latents = model.encode([data[mod] for mod in modalities[::-1]])               
+                z_samples = [q.sample((n_samples, )).cpu().detach().numpy()
+                             for q in latents]
+                z_samples = [z.reshape(-1, model.latent_dim)
+                             for z in z_samples]
+                z_samples = model.apply_threshold(
+                    z_samples, threshold=0.2, keep_dims=False, reorder=True)
+                thres_latent_dim = z_samples[0].shape[1]
+                z_samples = [z.reshape(n_samples, -1, thres_latent_dim)
+                             for z in z_samples]                
+                roi_z_samples, score_z_samples = z_samples
+                print_text(f"ROIs latents: {roi_z_samples.shape}")
+                print_text(f"Scores latents: {score_z_samples.shape}")
+                results[f"sMCVAE_roi_latents_{dataset}"] = roi_z_samples
+                results[f"sMCVAE_score_latents_{dataset}"] = score_z_samples
+            else:
+                raise Exception(f"Unexpected model {name}.")
+    features_file = os.path.join(benchdir, "latent_vecs10.npz")
+    np.savez_compressed(features_file, **results)
+    print_result(f"features: {features_file}")
+
+
+def benchmark_rsa_exp(dataset, datasetdir, outdir, run):
+    """ Compare the learned latent space of different models using
+    Representational Similarity Analysis (RSA).
+
+    Parameters
+    ----------
+    dataset: str
+        the dataset name: euaims or hbn.
+    datasetdir: str
+        the path to the dataset associated data.
+    outdir: str
+        the destination folder.
+    run: str
+        the name of the experiment in the destination folder:
+        `<dataset>_<timestamp>'.
+    """
+    import matplotlib.pyplot as plt
+    from plotting import plot_cmat, plot_bar
+
+    print_title(f"COMPARE MODELS USING RSA ANALYSIS: {dataset}")
+    expdir = os.path.join(outdir, run)
+    benchdir = os.path.join(expdir, "benchmark")
+    if not os.path.isdir(benchdir):
+        os.mkdir(benchdir)
+    print_text(f"experimental directory: {expdir}")
+    print_text(f"Benchmark directory: {benchdir}")
+
+    print_subtitle("Loading data...")
+    latent_data = np.load(os.path.join(benchdir, "latent_vecs10.npz"))
+    features_mopoe = latent_data[f"MoPoe_latents_{dataset}"]
+    features_roi_smcvae = latent_data[f"sMCVAE_roi_latents_{dataset}"]
+    features_score_smcvae = latent_data[f"sMCVAE_score_latents_{dataset}"]
+    cmat_mopoe = data2cmat(features_mopoe)
+    cmat_roi_smcvae = data2cmat(features_roi_smcvae)
+    cmat_score_smcvae = data2cmat(features_score_smcvae)
+    print_text(f"MoPoe similarities: {cmat_mopoe.shape}")
+    print_text(f"sMCVAE ROIs similarities: {cmat_roi_smcvae.shape}")
+    print_text(f"sMCVAE scores similarities: {cmat_score_smcvae.shape}")
+    meta_df= pd.read_csv(
+        os.path.join(benchdir, f"latent_meta_{dataset}.tsv"), sep="\t")
+    clinical_scores = ["asd", "age", "sex", "site", "fsiq"]
+    scale_scores = ["ordinal", "ratio", "ordinal", "ratio", "ratio"]
+    scores = dict((qname, scale)
+                  for qname, scale in zip(clinical_scores, scale_scores))
+    indices = range(cmat_mopoe.shape[1])
+    model_cmats = dict()
+    model_idxs = dict()
+    for qname in meta_df.columns:
+        if qname not in scores:
+            print_error(f"Ukknown score {qname}, use default ratio scale.")
+        scale = scores.get(qname, "ratio")
+        vec = meta_df[qname].values[indices]
+        idx = ~np.isnan(vec)
+        vec = vec[idx]
+        cmat = vec2cmat(vec, data_scale=scale)
+        model_cmats.update({qname: cmat})
+        model_idxs.update({qname: idx})
+        print_text(f"{qname} number of outliers measures: {np.sum(~idx)}")
+        print_text(f"{qname} features similarities: {cmat.shape}")
+
+    print_subtitle("Compute RSA...")
+    data_names = ["MoPoe", "Scores sMCVAE", "ROIs sMCVAE"]
+    data = [cmat_mopoe[:, indices][..., indices],
+            cmat_score_smcvae[:, indices][..., indices],
+            cmat_roi_smcvae[:, indices][..., indices]]
+    clinical_scores = meta_df.columns
+    rsa_results = dict()
+    rsa_records = dict((key, []) for key in data_names + ["score"])
+    for qname in clinical_scores:
+        res = np.array([
+            fit_rsa(arr, model_cmats[qname], idxs=model_idxs[qname])
+            for arr in data]).transpose()
+        for idx, name in enumerate(data_names):
+            rsa_records[name].extend(res[:, idx].tolist())
+        rsa_records["score"].extend([qname] * len(res))
+        rsa_results.update({qname: res})
+    rsa_df = pd.DataFrame.from_dict(rsa_records)
+    print(rsa_df.groupby("score").describe().loc[
+        :, (slice(None), ["count", "mean", "std"])])
+    rsa_df.to_csv(os.path.join(benchdir, "rsa.tsv"), sep="\t", index=False)
+
+    print_subtitle("Display subject's (dis)similarity matrices...")
+    ncols = len(data[0])
+    nrows = len(data)
+    plt.figure(figsize=np.array((ncols, nrows)) * 4)
+    idx1 = 0
+    for name, _data in zip(data_names, data):
+        for idx2, smat in enumerate(_data):
+            ax = plt.subplot(nrows, ncols, idx1 + 1)
+            plot_cmat(f"{name} ({idx2 + 1})", cmat, ax=ax, figsize=None,
+                      dpi=300, fontsize=12)
+            idx1 += 1
+    plt.subplots_adjust(
+        left=None, bottom=None, right=None, top=None, wspace=.5, hspace=.5)
+    plt.suptitle(f"{dataset.upper()} SUBJECTS (S) MAT", fontsize=20, y=.95)
+    filename = os.path.join(benchdir, f"sub_mat_{dataset}.png")
+    plt.savefig(filename)
+    print_result(f"subjects mat: {filename}")
+
+    print_subtitle("Display score's (dis)similarity matrices...")
+    ncols = 4
+    nrows = int(np.ceil(len(model_cmats) / ncols))
+    plt.figure(figsize=np.array((ncols, nrows)) * 4)
+    for idx, (name, cmat) in enumerate(model_cmats.items()):
+        ax = plt.subplot(nrows, ncols, idx + 1)
+        plot_cmat(name.upper(), cmat, ax=ax, figsize=None, dpi=300,
+                  fontsize=12)
+    plt.subplots_adjust(
+        left=None, bottom=None, right=None, top=None, wspace=.5, hspace=.5)
+    plt.suptitle(f"{dataset.upper()} CLINICAL (C) MAT", fontsize=20, y=.95)
+    filename = os.path.join(benchdir, f"clinical_mat_{dataset}.png")
+    plt.savefig(filename)
+    print_result(f"clinical mat: {filename}")
+
+    print_subtitle("Display Kendall tau statistics...")
+    ncols = 3
+    nrows = int(np.ceil(len(meta_df.columns) / ncols))
+    plt.figure(figsize=np.array((ncols, nrows)) * 4)
+    for idx, key in enumerate(meta_df.columns):
+        ax = plt.subplot(nrows, ncols, idx + 1)
+        plot_bar(key, rsa_results, ax=ax, figsize=None, dpi=300, fontsize=12,
+                 fontsize_star=12, fontweight="bold", line_width=2.5,
+                 marker_size=12, title=key.upper(), report_t=True,
+                 do_one_sample_stars=True)
+    plt.subplots_adjust(
+        left=None, bottom=None, right=None, top=None, wspace=.5, hspace=.5)
+    plt.suptitle(f"{dataset.upper()} RSA RESULTS", fontsize=20, y=.95)
+    filename = os.path.join(benchdir, f"rsa_{dataset}.png")
+    plt.savefig(filename)
+    print_result(f"RSA: {filename}")
