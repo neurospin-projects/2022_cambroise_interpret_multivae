@@ -94,8 +94,8 @@ def calc_elbo(exp, modality, recs, klds):
         w_rec = 0.0;
         klds_style = klds['style']
         for k, m_key in enumerate(mods.keys()):
-                w_style_kld += s_weights[m_key] * klds_style[m_key];
-                w_rec += r_weights[m_key] * recs[m_key];
+            w_style_kld += s_weights[m_key] * klds_style[m_key];
+            w_rec += r_weights[m_key] * recs[m_key];
         kld_style = w_style_kld;
         rec_error = w_rec;
     else:

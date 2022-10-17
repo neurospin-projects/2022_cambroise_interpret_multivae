@@ -89,7 +89,7 @@ class MultimodalDataset(torch.utils.data.Dataset):
             for mod in self.modalities if idx_per_mod[mod] is not None}
         if self.metadata is not None:
             ret["metadata"] = self.metadata.iloc[idx].to_dict()
-        ret["index"] = idx
+        # ret["index"] = idx
         if self.on_the_fly_transform is not None:
             transform = self.on_the_fly_transform
             for mod in self.modalities:

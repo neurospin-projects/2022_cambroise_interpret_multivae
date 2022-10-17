@@ -1,3 +1,4 @@
+from curses import color_pair
 import numpy as np
 import matplotlib
 import matplotlib.cm as cm
@@ -172,7 +173,7 @@ def plot_surf(data, metric):
         alpha=0.1)
     return fig
 
-def plot_areas(areas, colors):
+def plot_areas(areas, colors, color_name="Plotly", inflated=False):
     destrieux = datasets.fetch_atlas_surf_destrieux()    
     fsaverage = datasets.fetch_surf_fsaverage()
     lh_features, rh_features = nilearn_labels_to_feature_names(
@@ -181,8 +182,9 @@ def plot_areas(areas, colors):
     lh_map = np.zeros(destrieux["map_left"].shape)
     rh_map = np.zeros(destrieux["map_right"].shape)
     # mymap = mcolors.LinearSegmentedColormap.from_list("plotly", px.colors.qualitative.Plotly)
-    mymap = mcolors.ListedColormap(px.colors.qualitative.Plotly)
-    # bounds = np.arange(len(px.colors.qualitative.Plotly) + 1)
+    color_palette = getattr(px.colors.qualitative, color_name)
+    mymap = mcolors.ListedColormap(color_palette)
+    # bounds = np.arange(len(px.colors.qualitative.Alphabet) + 1)
     # norm = mcolors.BoundaryNorm(bounds, mymap.N)
     # mymap = cm.ScalarMappable(cmap=cmap, norm=norm)
     for idx, roi_name in enumerate(areas):
@@ -198,25 +200,33 @@ def plot_areas(areas, colors):
     # lh_texture[lh_texture == 0] = vmax + 1
     # rh_texture[rh_texture == 0] = vmax + 1
     # mymap.set_over((0.1, 0.1, 0.1, 0.1))*
-    alpha = 0.2
-    plotting.plot_surf_roi(fsaverage['pial_left'], roi_map=lh_map,
+    alpha = 1
+    bg_darkness = 0.4
+    template = "pial"
+    if inflated:
+        template = "infl"
+    plotting.plot_surf_roi(fsaverage['{}_left'.format(template)], roi_map=lh_map,
                        hemi='left', view='lateral', cmap=mymap,
-                       #bg_map=fsaverage['sulc_left'], bg_on_data=True,
+                       bg_map=fsaverage['sulc_left'], bg_on_data=True,
                        axes=axs[0, 0], alpha=alpha,
-                       vmin=0, vmax=len(px.colors.qualitative.Plotly))
-    plotting.plot_surf_roi(fsaverage['pial_left'], roi_map=lh_map,
+                       vmin=0, vmax=len(color_palette),
+                       darkness=bg_darkness)
+    plotting.plot_surf_roi(fsaverage['{}_left'.format(template)], roi_map=lh_map,
                        hemi='left', view='medial', cmap=mymap,
-                       #bg_map=fsaverage['sulc_left'], bg_on_data=True,
+                       bg_map=fsaverage['sulc_left'], bg_on_data=True,
                        axes=axs[0, 1], alpha=alpha,
-                       vmin=0, vmax=len(px.colors.qualitative.Plotly))
-    plotting.plot_surf_roi(fsaverage['pial_right'], roi_map=rh_map,
+                       vmin=0, vmax=len(color_palette),
+                       darkness=bg_darkness)
+    plotting.plot_surf_roi(fsaverage['{}_right'.format(template)], roi_map=rh_map,
                        hemi='right', view='lateral', cmap=mymap,
-                       #bg_map=fsaverage['sulc_right'], bg_on_data=True,
+                       bg_map=fsaverage['sulc_right'], bg_on_data=True,
                        axes=axs[1, 0], alpha=alpha,
-                       vmin=0, vmax=len(px.colors.qualitative.Plotly))
-    plotting.plot_surf_roi(fsaverage['pial_right'], roi_map=rh_map,
+                       vmin=0, vmax=len(color_palette),
+                       darkness=bg_darkness)
+    plotting.plot_surf_roi(fsaverage['{}_right'.format(template)], roi_map=rh_map,
                        hemi='right', view='medial', cmap=mymap,
-                       #bg_map=fsaverage['sulc_right'], bg_on_data=True,
+                       bg_map=fsaverage['sulc_right'], bg_on_data=True,
                        axes=axs[1, 1], alpha=alpha,
-                       vmin=0, vmax=len(px.colors.qualitative.Plotly))
+                       vmin=0, vmax=len(color_palette),
+                       darkness=bg_darkness)
     return fig

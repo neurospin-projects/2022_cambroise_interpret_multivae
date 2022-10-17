@@ -1,12 +1,12 @@
 import random
 import numpy as np 
-
+import json
 import torch
 from torchvision import transforms
 import torch.optim as optim
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
-
+import statsmodels.api as sm
 #from utils.BaseExperiment import BaseExperiment
 
 from modalities.multimodal_cohort import Clinical, Rois
@@ -47,6 +47,16 @@ class MultimodalExperiment(BaseExperiment):
         self.eval_metric = accuracy_score
         self.paths_fid = self.set_paths_fid()
         self.labels = ['ASD']
+    
+    @classmethod
+    def get_experiment(cls, flags_file, alphabet_file, checkpoint_file):
+        flags = torch.load(flags_file)
+        with open(alphabet_file, "rt") as of:
+            alphabet = str("".join(json.load(of)))
+        experiment = MultimodalExperiment(flags, alphabet)
+        checkpoint = torch.load(checkpoint_file)
+        experiment.mm_vae.load_state_dict(checkpoint)
+        return experiment, flags
 
     def set_model(self):
         model = VAE(self.flags, self.modalities, self.subsets)
@@ -54,10 +64,14 @@ class MultimodalExperiment(BaseExperiment):
         return model
 
     def set_modalities(self):
+        if type(self.flags.style_dim) is int:
+            self.flags.style_dim = [self.flags.style_dim] * self.num_modalities
+        elif len(self.flags.style_dim) != self.num_modalities:
+            self.flags.style_dim = [self.flags.style_dim[0]] * self.num_modalities
         mods = [Clinical, Rois]
         mods = [mods[m](self.flags.input_dim[m], Encoder(self.flags, m),
                         Decoder(self.flags, m), self.flags.class_dim,
-                        self.flags.style_dim, self.flags.likelihood) for m in range(self.num_modalities)]
+                        self.flags.style_dim[m], self.flags.likelihood) for m in range(self.num_modalities)]
         mods_dict = {m.name: m for m in mods}
         return mods_dict
 
@@ -72,12 +86,19 @@ class MultimodalExperiment(BaseExperiment):
             scaler.fit(all_training_data)
             scalers[mod] = scaler
         self.scalers = scalers
+
+    def set_residualizer(self, dataset):
+        residualizer = {}
+        for mod in self.modalities:
+            if mod in self.flags.residualize.keys():
+                
+                
     
     def unsqueeze_0(self, x):
         return x.unsqueeze(0)
 
     def set_dataset(self):
-        manager = DataManager(self.flags.dataset, self.flags.datasetdir, 
+        manager = DataManager(self.flags.dataset, self.flags.datasetdir,
                               list(self.modalities), overwrite=True,
                               allow_missing_blocks=self.flags.allow_missing_blocks)
         self.set_scalers(manager.train_dataset)
@@ -129,10 +150,10 @@ class MultimodalExperiment(BaseExperiment):
         samples = []
         for i in range(num_images):
             ix = random.randint(0, n_test-1)
-            sample, _ = self.dataset_test[ix]
+            sample, _, _ = self.dataset_test[ix]
             for key in sample.keys():
                 if sample[key] is not None:
-                    sample[key] = torch.tensor(sample[key]).to(self.flags.device)
+                    sample[key] = sample[key].to(self.flags.device)
             samples.append(sample)
         return samples
 

@@ -1,11 +1,12 @@
 from argparse import ArgumentParser
 import os
+import glob
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from scipy import stats
 import plotly.graph_objects as go
-import pickle
+import plotly.express as px
 
 import torch
 from torch.utils.data import DataLoader
@@ -16,6 +17,7 @@ from sklearn.decomposition import PCA
 from umap import UMAP
 
 from multimodal_cohort.dataset import DataManager, MissingModalitySampler
+from multimodal_cohort.experiment import MultimodalExperiment
 from plot_utils import plot_latent_representations, plot_surf, plot_areas
 
 parser = ArgumentParser()
@@ -139,6 +141,97 @@ plt.legend(title="Cohort", fontsize=12, prop={"family": "serif"},
             title_fontproperties={"family": "serif", "size": 13})
 
 
+plot_all_scores = False
+plot_rsa = False
+plot_meaningful_areas_per_score_per_metric = False
+# carefull, if True, opens as many fig tabs as number of clinical names * number of score + 3-4
+plot_latent_space = False
+plot_all_associations = False
+plot_radar = False
+
+####### test other scores
+if plot_all_scores:
+    clinical_names = np.load(os.path.join(args.datasetdir, "clinical_names.npy"), allow_pickle=True)
+    manager = DataManager(dataset="euaims", datasetdir=path,
+                        modalities=modalities, overwrite=True,
+                        allow_missing_blocks=allow_missing_blocks["euaims"],
+                        **kwargs)
+
+    if allow_missing_blocks["euaims"]:
+        sampler = MissingModalitySampler(manager["train"], batch_size=batch_size)
+        loader = DataLoader(manager["train"], batch_sampler=sampler, num_workers=8)
+        sampler_test = MissingModalitySampler(manager["test"], batch_size=batch_size)
+        loader_test = DataLoader(manager["test"], batch_sampler=sampler_test, num_workers=8) 
+    else:
+        loader = DataLoader(manager["train"], shuffle=True, batch_size=batch_size, num_workers=8)
+        loader_test = DataLoader(manager["test"], shuffle=True, batch_size=batch_size, num_workers=8)
+
+    all_clinical_data = []
+    all_metadata = []
+    all_diagnostic_train = []
+    all_diagnostic_test = []
+    for data in loader:
+        if "clinical" in data[0].keys():
+            all_clinical_data.append(data[0]["clinical"])
+            all_metadata.append(pd.DataFrame(data[2]))
+
+    for data in loader_test:
+        if "clinical" in data[0].keys():
+            all_clinical_data.append(data[0]["clinical"])
+            all_metadata.append(pd.DataFrame(data[2]))
+
+    X = torch.cat(all_clinical_data, dim=0).cpu().detach().numpy()
+    metadata = pd.concat(all_metadata, axis=0)
+    print(X.shape)
+
+    for score_idx, score in enumerate(clinical_names):
+        stuff_to_hist = []
+
+        if "asd" in metadata.columns:
+            bins = range(int(X[:, score_idx].min()), int(X[:, score_idx].max()), 2)
+            print(bins)
+            control_scores = X[:, score_idx][metadata["asd"] == 1]
+            asd_scores = X[:, score_idx][metadata["asd"] == 2]
+            stuff_to_hist.append(control_scores)
+            stuff_to_hist.append(asd_scores)
+        else:
+            stuff_to_hist.append(X[:, score_idx])
+        print("Stats for {}".format(clinical_names[score_idx]))
+        print("Minimum value : {}".format(min(X[:, score_idx])))
+        print("Maximum value : {}".format(max(X[:, score_idx])))
+        print("1st quantile : {}".format(np.quantile(X[:, score_idx], 0.25)))
+        print("3rd quantile : {}".format(np.quantile(X[:, score_idx], 0.75)))
+        print("Median value : {}".format(np.median(X[:, score_idx])))
+        print("Average value : {}".format(np.mean(X[:, score_idx])))
+        print("Standard deviation : {}".format(np.std(X[:, score_idx])))
+        print("Only entire values : {}".format(np.array_equal(X[:, score_idx], X[:, score_idx] // 1)))
+        print("Correlation wih age : {}".format(np.corrcoef(np.concatenate((X[:, score_idx][:, np.newaxis], metadata[["age"]].values), axis=1), rowvar=False)[0, 1]))
+        print("Correlation wih sex : {}".format(np.corrcoef(np.concatenate((X[:, score_idx][:, np.newaxis], metadata[["sex"]].values), axis=1), rowvar=False)[0, 1]))
+        if "asd" in metadata.columns:
+            print("Correlation wih diagnostic : {}".format(np.corrcoef(np.concatenate((X[:, score_idx][:, np.newaxis], metadata[["asd"]].values), axis=1), rowvar=False)[0, 1]))
+        print("\n")
+
+        alpha = 0.5
+        fig_width = 10
+        plt.figure(figsize=(fig_width, 3/4 * fig_width))
+        label = name_dataset_train
+        color = (control_color)
+        if len(stuff_to_hist) == 2:
+            label = ("Control", "ASD")
+            color = (control_color, asd_color)
+        plt.hist(stuff_to_hist,
+                alpha=alpha, bins=20, color=color,
+                density=True, label=label)
+        for x in stuff_to_hist:
+            kde = stats.gaussian_kde(x)
+            xx = np.linspace(x.min(), x.max(), 1000)
+            plt.plot(xx, kde(xx))
+        plt.xlabel(score, size=13, family="serif")
+        plt.ylabel("Proportion of participants", size=13, family="serif")
+        plt.legend(title="Diagnostic", fontsize=12, prop={"family": "serif"},
+                    title_fontproperties={"family": "serif", "size": 13})
+
+
 
 ################################### From stat analysis
 clinical_names = np.load(os.path.join(args.datasetdir, "clinical_names.npy"), allow_pickle=True)
@@ -146,33 +239,31 @@ rois_names = np.load(os.path.join(args.datasetdir, "rois_names.npy"), allow_pick
 
 params = {}
 params["euaims"] = {
-    "validation": 50, "n_discretization_steps": 200,
-    "n_samples": 50, "K": 1000, "trust_level": 3/4}
+    "validation": 20, "n_discretization_steps": 200,
+    "n_samples": 47, "K": 1000, "trust_level": 0.95,
+    "method": "hierarchical"}
 params["hbn"] = {
-    "validation": 50, "n_discretization_steps": 200,
-    "n_samples": 50, "K": 1000, "trust_level": 3/4}
+    "validation": 20, "n_discretization_steps": 200,
+    "n_samples": 150, "K": 1000, "trust_level": 1,
+    "method": "hierarchical"}
 validation = params[name_dataset_train]["validation"]
 n_discretization_steps = params[name_dataset_train]["n_discretization_steps"]
 n_samples = params[name_dataset_train]["n_samples"]
 val_size = n_samples / (len(manager["train"]) + len(manager["test"]))
 K = params[name_dataset_train]["K"]
 trust_level = params[name_dataset_train]["trust_level"]
+reg_method = params[name_dataset_train]["method"]
 stat_params = {
     "runs": validation,
     "samples_per_score": n_discretization_steps,
     "samples_in_run": n_samples,
     "K": K,
-    "pvalue_select_thr": trust_level
+    "method": reg_method
 }
-
-plot_meaningful_areas_per_score_per_metric = False
-
-# carefull, if True, opens as many fig tabs as number of clinical names * number of score + 3-4
-plot_latent_space = False
 
 dir_name = "_".join(["_".join([key, str(value)]) for key, value in stat_params.items()])
 path_to_save_fig = os.path.join(
-    args.dir_experiment, args.run, "figures", dir_name)
+    args.dir_experiment, args.run, "figures", dir_name + "_pvalue_select_thr_{}".format(trust_level))
 if not os.path.isdir(path_to_save_fig):
     os.makedirs(path_to_save_fig)
 
@@ -195,11 +286,13 @@ sources_per_metric = {}
 targets_per_metric = {}
 values_per_metric = {}
 colors_per_metric = {}
+pvalues_per_metric = {}
 for metric in metrics:
     sources_per_metric[metric] = []
     targets_per_metric[metric] = []
     values_per_metric[metric] = []
     colors_per_metric[metric] = []
+    pvalues_per_metric[metric] = []
     for idx, score in enumerate(clinical_names):
         for roi_idx, roi_name in enumerate(rois_names_no_metric_unique):
             roi_with_metric_idx = np.where(rois_names == roi_name + "_{}".format(metric))
@@ -209,6 +302,7 @@ for metric in metrics:
                 targets_per_metric[metric].append(roi_idx + len(clinical_names))
                 values_per_metric[metric].append(np.abs(coef))
                 colors_per_metric[metric].append("rgba(255,0,0,0.4)" if coef > 0 else "rgba(0,0,255,0.4)")
+                pvalues_per_metric[metric].append(pvalues[:, idx, roi_with_metric_idx].mean())
         if plot_meaningful_areas_per_score_per_metric:
             fig = plot_surf(coefs[:, idx].mean(0), metric)
             fig.suptitle("Average influence of {} on {}".format(score, metric))
@@ -217,6 +311,7 @@ for metric in metrics:
 #################################### Most linked brain areas across scores
 
 clinical_names = [name.replace("t1", "").replace("_", " ").strip() for name in clinical_names]
+srs_name = {key: value.replace("t1", "").replace("_", " ").strip() for key, value in srs_name.items()}
 plotting_clinical_names = {
     "euaims": {
         "rbs total": "RBS",
@@ -226,114 +321,174 @@ plotting_clinical_names = {
         "dawba anx": "DAWBA anx",
         "dawba dep": "DAWBA dep",
         "dawba behavdis": "DAWBA behavdis"
+    },
+    "hbn": {
+        "SCARED P Total": "Scared p",
+        "SDQ Hyperactivity": "SDQ hyperactiv",
+        "SRS Total": "SRS",
+        "CBCL WD": "CBCL wd",
+        "CBCL AB": "CBCL ab",
+        "CBCL AP": "CBCL ap",
+        "ARI P Total Score": "ARI p"
     }
 }
 
 textfont = textfont = dict(
-            size=20,
+            size=40,
             family="Droid Serif")
-    
-for metric in metrics:
-    targets, counts = np.unique(targets_per_metric[metric], return_counts=True)
-    counts_target = dict(zip(targets, counts))
-    counts_target = {k: v for k, v in sorted(counts_target.items(), key=lambda item: item[1], reverse=True)}
-    min_connections = 2
-    n_most_connected = 7
-    thr_count_target = {key: value for key, value in list(counts_target.items())[:n_most_connected] if value >= min_connections}
-    areas_to_plot = [rois_names_no_metric_unique[idx - len(clinical_names)] for idx in thr_count_target]
-    plot_areas(areas_to_plot, np.arange(len(thr_count_target)) + 0.01)
-    fig = go.Figure()
-    all_values = []
-    all_markers = []
-    marker_signif = "star"
-    marker_non_signif = "circle"
-    for area_idx, (area, count) in enumerate(thr_count_target.items()):
-        sources = np.array(sources_per_metric[metric])[np.array(targets_per_metric[metric]) == area]
-        values = np.array(values_per_metric[metric])[np.array(targets_per_metric[metric]) == area]
-        colors = np.array(colors_per_metric[metric])[np.array(targets_per_metric[metric]) == area]
-        if len(np.unique(colors)) > 1:
-            print("Signs of the meaninful coefficients differ !")
-        new_values = []
-        markers = []
-        for idx, name in enumerate(clinical_names):
-            if idx not in sources:
-                roi_name = rois_names_no_metric_unique[area - len(clinical_names)]
-                roi_with_metric_idx = np.where(rois_names == roi_name + "_{}".format(metric))
-                coef = coefs[:, idx, roi_with_metric_idx].mean()
-                coef = np.abs(coef)
-                new_values.append(coef)
-                markers.append(marker_non_signif)
-            else:
-                new_values.append(values[sources == idx][0])
-                markers.append(marker_signif)
+inflated = True
+for n_most_connected in [3]:#[3, 4, 5]:
+    color_palette = "Plotly"
+    if n_most_connected > 3:
+        color_palette = "Alphabet"
 
-        all_values += new_values
-        all_markers += markers
-        fig.add_trace(go.Scatterpolar(
-            r=new_values + [new_values[0]],
-            theta=["<b>" + plotting_clinical_names[name_dataset_train][name] + "</b>" for name in clinical_names + [clinical_names[0]]],
-            # fill='toself',
-            mode="lines+text",
-            legendgroup="roi",
-            legendgrouptitle = dict(
-                font=dict(
-                    size=30,
-                    family="Droid Serif"),
-                text="<b>Regions of interest</b>"),
-            name=rois_names_no_metric_unique[area - len(clinical_names)]
-        ))
-    all_markers = np.array(all_markers)
-    for marker, name in [(marker_non_signif, "non significative"), (marker_signif, "significative")]:
-        fig.add_trace(go.Scatterpolar(
-            r=np.array(all_values)[all_markers == marker],
-            theta=np.array(["<b>" + plotting_clinical_names[name_dataset_train][name] + "</b>" for name in clinical_names*len(thr_count_target)])[all_markers == marker],
-            # fill='toself',
-            mode="markers",
-            legendgroup="significativity",
-            legendgrouptitle = dict(
-                font=dict(
-                    size=30,
-                    family="Droid Serif"),
-                text="<b>Significativity</b>"),
-            marker_symbol=np.array(all_markers)[all_markers == marker],
-            marker_size=10,
-            marker_color="black",
-            name=name
-        ))
+    all_areas_to_plot = []
+    # n_areas_to_plot = 0
+    color_per_area = []
+    for metric in metrics:#["thickness", "area"]:
+        targets, counts = np.unique(targets_per_metric[metric], return_counts=True)
+        # summed_values = [np.array(values_per_metric[metric])[np.array(targets_per_metric[metric]) == target].sum() for target in targets]
+        # counts_target = dict(zip(targets, zip(counts, summed_values)))
+        # counts_target = {k: v for k, v in sorted(counts_target.items(), key=lambda item: (item[1][0], item[1][1]), reverse=True)}
+        sorted_target = {t: v for t, v in sorted(zip(targets_per_metric[metric], pvalues_per_metric[metric]), key=lambda item: item[1], reverse=True)}
+        min_connections = 2
+        # thr_count_target = {key: value for key, value in list(counts_target.items())[:n_most_connected] if value[0] >= min_connections}
+        
+        # Plot for this metric
+        thr_count_target = {key: value for key, value in list(sorted_target.items())[:10]}
+        areas_to_plot = [rois_names_no_metric_unique[idx - len(clinical_names)] for idx in thr_count_target]
+        plot_areas(areas_to_plot, np.arange(len(areas_to_plot)) + 0.01, "Plotly", inflated)
+        plt.title("most meaningfull area for {}".format(metric))
 
-    fig.update_layout(
-            polar=dict(
-                radialaxis=dict(
-                    visible=True,
-                    showticklabels=False, ticks='',
-                    range=[0, max(all_values)+0.003],
-                ),
-            ),
-            font=textfont,
-        )
-    fig.show()
+        thr_count_target = {key: value for key, value in list(sorted_target.items())[:n_most_connected]}
+        areas_to_plot = [rois_names_no_metric_unique[idx - len(clinical_names)] for idx in thr_count_target]
+        all_areas_to_plot += [area for area in areas_to_plot if area not in all_areas_to_plot]
+        # n_areas_to_plot += len(thr_count_target)
+        # plot_areas(areas_to_plot, np.arange(len(thr_count_target)) + 0.01)
+        
+        fig = go.Figure()
+        all_values = []
+        all_markers = []
+        marker_signif = "star"
+        marker_non_signif = "circle"
+        for area_idx, (area, count) in enumerate(thr_count_target.items()):
+            sources = np.array(sources_per_metric[metric])[np.array(targets_per_metric[metric]) == area]
+            values = np.array(values_per_metric[metric])[np.array(targets_per_metric[metric]) == area]
+            colors = np.array(colors_per_metric[metric])[np.array(targets_per_metric[metric]) == area]
+            if len(np.unique(colors)) > 1:
+                print("Signs of the meaninful coefficients differ !")
+            new_values = []
+            markers = []
+            
+            for idx, name in enumerate(clinical_names):
+                if idx not in sources:
+                    roi_name = rois_names_no_metric_unique[area - len(clinical_names)]
+                    roi_with_metric_idx = np.where(rois_names == roi_name + "_{}".format(metric))
+                    coef = coefs[:, idx, roi_with_metric_idx].mean()
+                    coef = np.abs(coef)
+                    new_values.append(coef)
+                    markers.append(marker_non_signif)
+                else:
+                    new_values.append(values[sources == idx][0])
+                    markers.append(marker_signif)
+            area_name = rois_names_no_metric_unique[area - len(clinical_names)]
+            if area_name not in color_per_area:
+                color_per_area.append(area_name)
+            color_idx = color_per_area.index(area_name)
+            color = getattr(px.colors.qualitative, color_palette)[color_idx]
+            all_values += new_values
+            all_markers += markers
+            fig.add_trace(go.Scatterpolar(
+                r=new_values + [new_values[0]],
+                theta=["<b>" + plotting_clinical_names[name_dataset_train][name] + "</b>" for name in clinical_names + [clinical_names[0]]],
+                # fill='toself',
+                mode="lines+text",
+                marker_color=color,
+                line_width=5,
+                legendgroup="roi",
+                legendgrouptitle = dict(
+                    font=dict(
+                        size=textfont["size"] + 4,
+                        family="Droid Serif"),
+                    text="<b>Regions of interest</b>"),
+                name=area_name
+            ))
+        if len(all_values) > 0:
+            all_markers = np.array(all_markers)
+            for marker, name in [(marker_non_signif, "non significative"), (marker_signif, "significative")]:
+                fig.add_trace(go.Scatterpolar(
+                    r=np.array(all_values)[all_markers == marker],
+                    theta=np.array(["<b>" + plotting_clinical_names[name_dataset_train][name] + "</b>" for name in clinical_names*len(thr_count_target)])[all_markers == marker],
+                    # fill='toself',
+                    mode="markers",
+                    legendgroup="significativity",
+                    legendgrouptitle = dict(
+                        font=dict(
+                            size=textfont["size"] + 4,
+                            family="Droid Serif"),
+                        text="<b>Significativity</b>"),
+                    marker_symbol=np.array(all_markers)[all_markers == marker],
+                    marker_size=15,
+                    marker_color="black",
+                    name=name
+                ))
+            fig.update_layout(
+                    polar=dict(
+                        radialaxis=dict(
+                            visible=True,
+                            showticklabels=False, ticks='',
+                            range=[0, max(all_values)+0.003],
+                        ),
+                    ),
+                    font=textfont,
+                )
+            if plot_radar:
+                fig.show()
+        else:
+            print("No meaningfully mostly connected rois for {}".format(metric))
+    n_areas_to_plot = len(all_areas_to_plot)
+    plot_areas(all_areas_to_plot, np.arange(n_areas_to_plot) + 0.01, color_palette, inflated)
+idx_of_srs = clinical_names.index(srs_name[name_dataset_train])
+areas = [rois_names_no_metric_unique[area_idx - len(clinical_names)] for idx, area_idx in enumerate(targets_per_metric["thickness"]) if sources_per_metric["thickness"][idx] == idx_of_srs]
+print(areas)
+plot_areas(areas, np.arange(len(areas)) + 0.01, color_palette, inflated)
+plt.savefig(os.path.join(path_to_save_fig, "most_connected_areas"))
 
 ############################# Meaningful associations plot
+if plot_all_associations:
+    textfont["size"] = 24
+    for metric in metrics:
+        sorted_scores = [plotting_clinical_names[name_dataset_train][clinical_names[source_idx]] for source_idx in np.array(sources_per_metric[metric])]
+        sorted_rois = [rois_names_no_metric_unique[target_idx - len(clinical_names)] for target_idx in np.array(targets_per_metric[metric])]
+        sankey_plot = go.Parcats(
+            domain={"x": [0.05, 0.9], "y": [0, 1]},
+            dimensions=[{"label": "Score", "values": sorted_scores},
+                        {"label": "ROI", "values": sorted_rois}],
+            counts=np.array(values_per_metric[metric]),
+            line={'color': colors_per_metric[metric], 'shape': 'hspline'},
+            labelfont=dict(family="Droid Serif", size=textfont["size"] + 4), tickfont=textfont)
+        fig = go.Figure(data=[sankey_plot])
 
-for metric in metrics:
-    sorted_scores = [plotting_clinical_names[name_dataset_train][clinical_names[source_idx]] for source_idx in np.array(sources_per_metric[metric])]
-    sorted_rois = [rois_names_no_metric_unique[target_idx - len(clinical_names)] for target_idx in np.array(targets_per_metric[metric])]
-    sankey_plot = go.Parcats(
-        domain={"x": [0.05, 0.9], "y": [0, 1]},
-        dimensions=[{"label": "Score", "values": sorted_scores},
-                    {"label": "ROI", "values": sorted_rois}],
-        counts=np.array(values_per_metric[metric]),
-        line={'color': colors_per_metric[metric], 'shape': 'hspline'},
-        labelfont=dict(family="Droid Serif", size=28), tickfont=textfont)
-    fig = go.Figure(data=[sankey_plot])
-
-    fig.show()
+        fig.show()
 
 
 ##################################### Latent space plots
 if plot_latent_space:
-    with open(os.path.join(args.dir_experiment, args.run, "experiment.pickle"), "rb") as f:
-        exp = pickle.load(f)
+    print("Loading data...")
+    flags_file = os.path.join(args.dir_experiment, args.run, "flags.rar")
+    if not os.path.isfile(flags_file):
+        raise ValueError("You need first to train the model.")
+    alphabet_file = os.path.join(os.getcwd(), "alphabet.json")
+    checkpoints_files = glob.glob(
+        os.path.join(args.dir_experiment, args.run, "checkpoints", "*", "mm_vae"))
+    if len(checkpoints_files) == 0:
+        raise ValueError("You need first to train the model.")
+    checkpoints_files = sorted(
+        checkpoints_files, key=lambda path: int(path.split(os.sep)[-2]))
+    checkpoint_file = checkpoints_files[-1]
+    print(f"Restoring weights: {checkpoint_file}")
+    exp, flags = MultimodalExperiment.get_experiment(
+        flags_file, alphabet_file, checkpoint_file)
 
     print(len(exp.dataset_train))
     if "allow_missing_blocks" in vars(exp.flags) and exp.flags.allow_missing_blocks:
@@ -439,16 +594,17 @@ if plot_latent_space:
                                         n_dims=n_components)
 
 ################################## RSA plots
-latent_dissimilarity = np.load(os.path.join(args.dir_experiment, args.run, "results", dir_name, "latent_dissimilarity.npy"))
-scores_dissimilarity = np.load(os.path.join(args.dir_experiment, args.run, "results", dir_name, "scores_dissimilarity.npy"))
-plt.figure()
-plt.imshow(latent_dissimilarity)
-plt.title("Dissimilarity matrix of the latent space")
-plt.savefig(os.path.join(args.dir_experiment, args.run, "figures", "dissimilarity_latent"))
-for idx, score in enumerate(clinical_names):
+if plot_rsa:
+    latent_dissimilarity = np.load(os.path.join(args.dir_experiment, args.run, "results", dir_name, "latent_dissimilarity.npy"))
+    scores_dissimilarity = np.load(os.path.join(args.dir_experiment, args.run, "results", dir_name, "scores_dissimilarity.npy"))
     plt.figure()
-    plt.imshow(scores_dissimilarity[idx])
-    plt.title("Dissimilarity matrix of {}".format(score))
-    plt.savefig(os.path.join(args.dir_experiment, args.run, "figures", "dissimilarity_{}".format(score)))
+    plt.imshow(latent_dissimilarity)
+    plt.title("Dissimilarity matrix of the latent space")
+    plt.savefig(os.path.join(args.dir_experiment, args.run, "figures", "dissimilarity_latent"))
+    for idx, score in enumerate(clinical_names):
+        plt.figure()
+        plt.imshow(scores_dissimilarity[idx])
+        plt.title("Dissimilarity matrix of {}".format(score))
+        plt.savefig(os.path.join(args.dir_experiment, args.run, "figures", "dissimilarity_{}".format(score)))
 
 plt.show()

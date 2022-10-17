@@ -4,6 +4,7 @@ import json
 
 import torch
 import pickle
+import pandas as pd
 
 from run_epochs import run_epochs
 
@@ -42,9 +43,33 @@ if __name__ == '__main__':
     with open(alphabet_path) as alphabet_file:
         alphabet = str(''.join(json.load(alphabet_file)))
     mst = MultimodalExperiment(FLAGS, alphabet)
+    print(mst.mm_vae)
     mst.set_optimizer()
 
     run_epochs(mst)
 
-    with open(os.path.join(FLAGS.dir_experiment_run, "experiment.pickle"), "wb") as f:
-        pickle.dump(mst, f, pickle.HIGHEST_PROTOCOL)
+    if os.path.exists(os.path.join(FLAGS.dir_experiment, "runs.tsv")):
+        runs = pd.read_table(os.path.join(FLAGS.dir_experiment, "runs.tsv"))
+        new_run = pd.DataFrame(dict(
+            name=[FLAGS.str_experiment],
+            dataset=[FLAGS.dataset],
+            out_scale_per_subject=[FLAGS.learn_output_sample_scale],
+            n_hidden_layer_encoder=[FLAGS.num_hidden_layer_encoder],
+            n_hidden_layer_decoder=[FLAGS.num_hidden_layer_decoder]))
+        runs = pd.concat((runs, new_run))
+    else:
+        runs = dict(name=[],
+                    dataset=[],
+                    out_scale_per_subject=[],
+                    n_hidden_layer_encoder=[],
+                    n_hidden_layer_decoder=[])
+        for run in os.listdir(FLAGS.dir_experiment):
+            if run.startswith("hbn") or run.startswith("euaims"):
+                flags = torch.load(os.path.join(FLAGS.dir_experiment, run, "flags.rar"))
+                runs["name"].append(flags.str_experiment)
+                runs["dataset"].append(flags.dataset)
+                runs["out_scale_per_subject"].append(flags.learn_output_sample_scale)
+                runs["n_hidden_layer_encoder"].append(flags.num_hidden_layer_encoder)
+                runs["n_hidden_layer_decoder"].append(flags.num_hidden_layer_decoder)
+        runs = pd.DataFrame(runs)
+    runs.to_csv(os.path.join(FLAGS.dir_experiment, "runs.tsv"), index=False, sep="\t")

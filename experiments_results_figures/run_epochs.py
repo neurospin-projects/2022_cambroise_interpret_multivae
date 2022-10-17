@@ -52,7 +52,7 @@ def calc_klds_style(exp, result):
     latents = result["latents"]["modalities"]
     klds = dict()
     for m, key in enumerate(latents.keys()):
-        if key.endswith("style"):
+        if key.endswith("style") and latents[key][0] is not None:
             mu, logvar = latents[key]
             klds[key] = calc_kl_divergence(mu, logvar,
                                            norm_value=len(mu))
@@ -64,7 +64,8 @@ def calc_style_kld(exp, klds):
     style_weights = exp.style_weights
     weighted_klds = 0.0
     for m, m_key in enumerate(mods.keys()):
-        weighted_klds += style_weights[m_key]*klds[m_key + "_style"]
+        if m_key + "_style" in klds.keys():
+            weighted_klds += style_weights[m_key]*klds[m_key + "_style"]
     return weighted_klds
 
 
@@ -89,7 +90,6 @@ def basic_routine_epoch(exp, batch):
     klds = calc_klds(exp, results)
     if exp.flags.factorized_representation:
         klds_style = calc_klds_style(exp, results)
-
     if (exp.flags.modality_jsd or exp.flags.modality_moe
         or exp.flags.joint_elbo):
         if exp.flags.factorized_representation:
