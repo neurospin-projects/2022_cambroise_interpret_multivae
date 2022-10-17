@@ -1,5 +1,7 @@
+from ctypes import resize
 import random
-import numpy as np 
+import numpy as np
+import pandas as pd
 import json
 import torch
 from torchvision import transforms
@@ -19,19 +21,41 @@ from multimodal_cohort.networks.networks import Encoder, Decoder
 
 from utils.BaseExperiment import BaseExperiment
 
-class Residualizer():
-    def __init__(self, by):
-        self.by = by
+class Residualizer:
+    def __init__(self, by_continuous, by_categorical):
+        self.by_continuous = by_continuous
+        self.by_categorical = by_categorical
+        self.estimators = None
 
     def fit(self, df, columns_to_residualize):
-        pass
+        formula = ("{} ~ " + " + ".join(self.by_continuous) + " + " +
+                   " + ".join(["C({})".format(cat) for cat in self.by_categorical]))
+        self.columns_to_residualize = columns_to_residualize
+        self.estimators = []
+        for col in columns_to_residualize:
+            est = sm.OLS.from_formula(formula.format(col), data=df)
+            est.fit()
+            self.estimators.append(est)
 
     def transform(self, df):
-        pass
+        if self.estimators is None:
+            raise ValueError("You must fit the residualizer before transforming data")
+        new_df = df.copy()
+        for col_idx, col in self.columns_to_residualize:
+            new_df[col] -= self.estimators[col_idx].predict(exog=df[self.by])
+        return new_df
 
     def fit_transform(self, df, columns_to_residualize):
         self.fit(df, columns_to_residualize)
         return self.transform(df)
+    
+    def inverse_transform(self, df):
+        if self.estimators is None:
+            raise ValueError("You must fit the residualizer before transforming data")
+        new_df = df.copy()
+        for col_idx, col in self.columns_to_residualize:
+            new_df[col] += self.estimators[col_idx].predict(exog=df[self.by])
+        return new_df
     
 
 
@@ -113,8 +137,17 @@ class MultimodalExperiment(BaseExperiment):
                 for data in dataset:
                     if mod in data[0].keys():
                         all_training_data.append(data[0][mod])
-                        all_metadata.append(data[2])
+                        all_metadata.append(pd.DataFrame(data[2]))
+                all_training_data = torch.cat(all_training_data, dim=0).cpu().detach().numpy()
+                if mod in self.scalers.keys():
+                    all_training_data = self.scaler[mod].transform(all_training_data)
+                df = pd.concat(all_metadata, axis=0)
+                columns = [str(idx) for idx in range(all_training_data.shape[1])]
+                df[columns] = all_training_data
                 residualizer[mod] = Residualizer(by=self.flags.residualize_by[mod])
+                residualizer[mod].fit(df, columns)
+        self.residualizer = residualizer
+
     def unsqueeze_0(self, x):
         return x.unsqueeze(0)
 
@@ -123,9 +156,11 @@ class MultimodalExperiment(BaseExperiment):
                               list(self.modalities), overwrite=True,
                               allow_missing_blocks=self.flags.allow_missing_blocks)
         self.set_scalers(manager.train_dataset)
+        self.set_residualizer(manager.train_dataset)
         self.transform = {mod: transforms.Compose([
             self.unsqueeze_0,
             scaler.transform,
+            self.residualizers[mod],
             transforms.ToTensor(),
             torch.squeeze]) for mod, scaler in self.scalers.items()}
         # transform = None
@@ -180,3 +215,4 @@ class MultimodalExperiment(BaseExperiment):
 
     def mean_eval_metric(self, values):
         return np.mean(np.array(values))
+
