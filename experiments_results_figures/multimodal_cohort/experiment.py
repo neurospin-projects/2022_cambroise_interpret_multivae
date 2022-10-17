@@ -19,6 +19,21 @@ from multimodal_cohort.networks.networks import Encoder, Decoder
 
 from utils.BaseExperiment import BaseExperiment
 
+class Residualizer():
+    def __init__(self, by):
+        self.by = by
+
+    def fit(self, df, columns_to_residualize):
+        pass
+
+    def transform(self, df):
+        pass
+
+    def fit_transform(self, df, columns_to_residualize):
+        self.fit(df, columns_to_residualize)
+        return self.transform(df)
+    
+
 
 class MultimodalExperiment(BaseExperiment):
     def __init__(self, flags, alphabet):
@@ -88,12 +103,18 @@ class MultimodalExperiment(BaseExperiment):
         self.scalers = scalers
 
     def set_residualizer(self, dataset):
+        if "residualize_by" not in vars(self.flags):
+            pass
         residualizer = {}
         for mod in self.modalities:
-            if mod in self.flags.residualize.keys():
-                
-                
-    
+            if mod in self.flags.residualize_by.keys():
+                all_training_data = []
+                all_metadata = []
+                for data in dataset:
+                    if mod in data[0].keys():
+                        all_training_data.append(data[0][mod])
+                        all_metadata.append(data[2])
+                residualizer[mod] = Residualizer(by=self.flags.residualize_by[mod])
     def unsqueeze_0(self, x):
         return x.unsqueeze(0)
 
