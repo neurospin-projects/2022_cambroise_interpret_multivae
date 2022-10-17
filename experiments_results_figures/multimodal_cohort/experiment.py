@@ -1,5 +1,6 @@
 from ctypes import resize
 import random
+import os
 import numpy as np
 import pandas as pd
 import json
@@ -33,6 +34,7 @@ class Residualizer:
         self.columns_to_residualize = columns_to_residualize
         self.estimators = []
         for col in columns_to_residualize:
+            print(formula.format(col))
             est = sm.OLS.from_formula(formula.format(col), data=df)
             est.fit()
             self.estimators.append(est)
@@ -67,6 +69,11 @@ class MultimodalExperiment(BaseExperiment):
         # self.dataset_name = flags.dataset
         self.num_modalities = flags.num_mods
         self.alphabet = alphabet
+        self.residualize_by = dict()
+        self.residualize_by["rois"] = dict(
+            continuous=["age"],
+            categorical=["sex", "site"]
+        )
         # self.plot_img_size = torch.Size((3, 28, 28))
         # self.font = ImageFont.truetype('FreeSerif.ttf', 38)
         self.flags.num_features = len(alphabet)
@@ -126,27 +133,31 @@ class MultimodalExperiment(BaseExperiment):
             scalers[mod] = scaler
         self.scalers = scalers
 
-    def set_residualizer(self, dataset):
-        if "residualize_by" not in vars(self.flags):
+    def set_residualizers(self, dataset):
+        if "residualize_by" not in vars(self):
+            print("Residualize by doesnt exist")
             pass
-        residualizer = {}
+        print("Setting residualizers !")
+        residualizers = {}
         for mod in self.modalities:
-            if mod in self.flags.residualize_by.keys():
+            if mod in self.residualize_by.keys():
                 all_training_data = []
                 all_metadata = []
-                for data in dataset:
+                for idx, data in enumerate(dataset):
                     if mod in data[0].keys():
                         all_training_data.append(data[0][mod])
-                        all_metadata.append(pd.DataFrame(data[2]))
-                all_training_data = torch.cat(all_training_data, dim=0).cpu().detach().numpy()
+                        all_metadata.append(data[2])
+                all_training_data = np.asarray(all_training_data)
                 if mod in self.scalers.keys():
-                    all_training_data = self.scaler[mod].transform(all_training_data)
-                df = pd.concat(all_metadata, axis=0)
-                columns = [str(idx) for idx in range(all_training_data.shape[1])]
-                df[columns] = all_training_data
-                residualizer[mod] = Residualizer(by=self.flags.residualize_by[mod])
-                residualizer[mod].fit(df, columns)
-        self.residualizer = residualizer
+                    all_training_data = self.scalers[mod].transform(all_training_data)
+                df = pd.DataFrame.from_records(all_metadata)
+                columns = np.load(os.path.join(self.flags.datasetdir, self.modalities[mod].names_file), allow_pickle=True)
+                columns = [col.replace("&", "and") for col in columns]
+                df = pd.concat([df, pd.DataFrame(all_training_data, columns=columns)], axis=1)
+                residualizers[mod] = Residualizer(by_continuous=self.residualize_by[mod]["continuous"],
+                                                  by_categorical=self.residualize_by[mod]["categorical"])
+                residualizers[mod].fit(df, columns)
+        self.residualizers = residualizers
 
     def unsqueeze_0(self, x):
         return x.unsqueeze(0)
@@ -156,11 +167,11 @@ class MultimodalExperiment(BaseExperiment):
                               list(self.modalities), overwrite=True,
                               allow_missing_blocks=self.flags.allow_missing_blocks)
         self.set_scalers(manager.train_dataset)
-        self.set_residualizer(manager.train_dataset)
+        self.set_residualizers(manager.train_dataset)
         self.transform = {mod: transforms.Compose([
             self.unsqueeze_0,
             scaler.transform,
-            self.residualizers[mod],
+            self.residualizers[mod].transform,
             transforms.ToTensor(),
             torch.squeeze]) for mod, scaler in self.scalers.items()}
         # transform = None

@@ -11,6 +11,7 @@ class Clinical(Modality):
         self.data_size = torch.Size([n_scores])
         self.gen_quality_eval = True
         self.file_suffix = ".npy"
+        self.names_file = "clinical_names.npy"
 
 
     def save_data(self, d, fn, args):
@@ -28,6 +29,7 @@ class Rois(Modality):
         self.data_size = torch.Size([n_rois])
         self.gen_quality_eval = True
         self.file_suffix = '.npy'
+        self.names_file = "rois_names.npy"
 
 
     def save_data(self, d, fn, args):
