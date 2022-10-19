@@ -1,5 +1,7 @@
+from multiprocessing import allow_connection_pickling
 import os
 import copy
+import time
 import numpy as np
 import pandas as pd
 import torch
@@ -8,7 +10,7 @@ from sklearn.model_selection import ShuffleSplit
 from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit, MultilabelStratifiedKFold
 
 from multimodal_cohort.fetchers import *
-from multimodal_cohort.utils import discretizer
+from multimodal_cohort.utils import discretizer, extract_and_order_by
 
 class MultimodalDataset(torch.utils.data.Dataset):
     """ Multimodal dataset
@@ -22,6 +24,7 @@ class MultimodalDataset(torch.utils.data.Dataset):
         self.modalities = list(self.idx_per_mod)
         self.metadata = (pd.read_table(metadata_path) if metadata_path
                          else None)
+       
         n_samples = [len(self.idx_per_mod[key]) for key in self.modalities]
         if not all([n_samples[i] == n_samples[(i+1) % len(n_samples)]
                     for i in range(len(n_samples))]):
@@ -48,9 +51,19 @@ class MultimodalDataset(torch.utils.data.Dataset):
                 1, len(self.modalities)+1)))
         self.idx_per_modality_subset = self.compute_idx_per_modality_subset()
 
+        # if residualizers is not None:
+        datasetdir = "/".join(idx_path.split("/")[:-1])
+        column_names = {}
+        for mod in self.modalities:
+            columns = np.load(os.path.join(
+                datasetdir, "{}_names.npy".format(mod)),
+                                allow_pickle=True)
+            columns = [col.replace("&", "_").replace("-", "_") for col in columns]
+            column_names[mod] = columns
+
         data_path = idx_path.replace("idx", "data").replace(".npz", ".npy")
         data_path = data_path.replace("_train", "").replace("_test", "")
-        if transform is not None:
+        if transform is not None and transform:
             transformed_data = {}
             data_path = data_path.replace(".npy", "_transformed.npy")
             for mod in self.modalities:
@@ -60,7 +73,12 @@ class MultimodalDataset(torch.utils.data.Dataset):
                     data = np.load(orig_mod_path, mmap_mode="r")
                     if type(transform) == dict:
                         if mod in transform.keys():
-                            transformed_data[mod] = transform[mod](data)
+                            columns = column_names[mod]
+                            mod_metadata = pd.read_table(os.path.join(datasetdir, "{}_metadata.tsv".format(mod)))
+                            df = pd.concat([mod_metadata,
+                                            pd.DataFrame(data, columns=columns)],
+                                            axis=1)
+                            transformed_data[mod] = transform[mod](df)[columns].values
                         else:
                             transformed_data[mod] = data
                     else:
@@ -99,13 +117,30 @@ class MultimodalDataset(torch.utils.data.Dataset):
                     data = torch.tensor(data)
                     if type(transform) == dict and mod in transform.keys():
                         ret[mod] = transform[mod](data)
-                    else:
+                    elif type(transform) != dict:
                         ret[mod] = transform(data)
+                    # if self.residualizers is not None and mod in self.residualizers:
+                    #     back_to_tensor = False
+                    #     if type(data) is torch.Tensor:
+                    #         back_to_tensor = True
+                    #         data = data.cpu().detach().numpy()
+                    #     columns = self.column_names[mod]
+                    #     t = time.time()
+                    #     df = pd.concat([pd.DataFrame({key: [value] for key, value in ret["metadata"].items()}),
+                    #                    pd.DataFrame(data[np.newaxis, :], columns=columns)],
+                    #                   axis=1)
+                    #     print("building df : ", time.time() - t)
+                    #     t = time.time()
+                    #     new_data = self.residualizers[mod].transform(df) 
+                    #     print("residualizing : ", time.time() - t)
+                    #     if back_to_tensor:
+                    #         new_data = torch.Tensor(new_data[columns].values).squeeze()
+                    #     ret[mod] = new_data
         if self.on_the_fly_inter_transform is not None:
             ret = self.on_the_fly_inter_transform(ret)
         label = 0
         if "asd" in ret["metadata"]:
-            label = ret["metadata"]["asd"]-1
+            label = ret["metadata"]["asd"] - 1
         metadata = ret["metadata"]
         del ret["metadata"]
         return ret, label, metadata

@@ -11,6 +11,7 @@ import pandas as pd
 from argparse import ArgumentParser
 
 import statsmodels.api as sm
+from statsmodels.stats.anova import anova_lm
 from scipy.stats import kendalltau
 
 from multimodal_cohort.dataset import DataManager, MissingModalitySampler
@@ -32,6 +33,7 @@ def make_regression(df, x_name, y_name, other_cov_names=[], groups_name=None, me
     formula = "{} ~ {}".format(y_name, x_name)
     formula = " + ".join([formula] + other_cov_names)
     idx_of_beta = x_name
+    subjects_betas = None
     if method == "fixed":
         est = sm.OLS.from_formula(formula, data=df)
     elif method == "mixed":
@@ -40,10 +42,11 @@ def make_regression(df, x_name, y_name, other_cov_names=[], groups_name=None, me
         lv1 = [[group_lab, sm.OLS.from_formula(formula, group_df).fit().params[x_name]]
                for group_lab, group_df in df.groupby(groups_name)]
         lv1 = pd.DataFrame(lv1, columns=[groups_name, 'beta'])
+        subjects_betas = lv1
         est = sm.OLS.from_formula("beta ~ 1", data=lv1)
         idx_of_beta = "Intercept"
     results = est.fit()
-    return results.pvalues[idx_of_beta], results.params[idx_of_beta] 
+    return results.pvalues[idx_of_beta], results.params[idx_of_beta], subjects_betas
     
 
 name_dataset_train = args.run.split("_")[0]
@@ -125,7 +128,7 @@ gradient_over_scores = True
 params = {}
 params["euaims"] = {
     "validation": 20, "n_discretization_steps": 200,
-    "n_samples": 47, "K": 1000, "trust_level": 1,
+    "n_samples": 48, "K": 1000, "trust_level": 1,
     "method": "hierarchical"}
 params["hbn"] = {
     "validation": 20, "n_discretization_steps": 200,
@@ -140,6 +143,9 @@ seed = 1037
 np.random.seed(seed)
 torch.manual_seed(seed)
 
+if not os.path.isdir(os.path.join(args.dir_experiment, args.run, "results")):
+    os.makedirs(os.path.join(args.dir_experiment, args.run, "results"))
+
 if gradient_over_scores:
 
     val_size = n_samples / (len(exp.dataset_train) * (5/4))
@@ -152,9 +158,6 @@ if gradient_over_scores:
         "K": K,
         "method": reg_method
     }
-
-    if not os.path.isdir(os.path.join(args.dir_experiment, args.run, "results")):
-        os.makedirs(os.path.join(args.dir_experiment, args.run, "results"))
     
     dir_name = "_".join(["_".join([key, str(value)]) for key, value in stat_params.items()])    
     if not os.path.isdir(os.path.join(args.dir_experiment, args.run, "results", dir_name)):
@@ -184,6 +187,9 @@ if gradient_over_scores:
         n_rois = train_data["rois"].cpu().detach().numpy().shape[1]
         pvalues = np.zeros((validation, n_scores, n_rois))
         coefs = np.zeros((validation, n_scores, n_rois))
+        if reg_method == "hierarchical":
+            all_coefs = []
+            anova_pvalues = np.zeros((validation, n_scores, n_rois))
         # correlations_between_init_error_and_mixed_param = np.zeros(validation)
         plot_stuff = False
         if validation == 1:
@@ -292,12 +298,13 @@ if gradient_over_scores:
                     score_mean_reconstruction=score_reconstructions.cpu().detach().numpy()[:, :, index_of_srs].flatten(),
                     score_std_reconstruction=clinical_std_mean.repeat(1, n_discretization_steps, 1).cpu().detach().numpy()[:, :, index_of_srs].flatten(),
                     sampled_score=np.swapaxes(score_values.detach().numpy(), 0, 1)[:, :, index_of_srs].flatten())
+                metadata_df = pd.DataFrame(columns=list(metadata.keys()))
                 for column in metadata.keys():
                     if type(metadata[column]) is list:
-                        values = np.array(metadata[column])
+                        metadata_df[column] = np.array(metadata[column])
                     else:
-                        values = metadata[column].cpu().detach().numpy()
-                    srs_modifications[column] = np.repeat(values[:, np.newaxis], n_discretization_steps, axis=1).flatten()
+                        metadata_df[column] = metadata[column].cpu().detach().numpy()
+                    srs_modifications[column] = np.repeat(np.array(metadata_df[column])[:, np.newaxis], n_discretization_steps, axis=1).flatten()
 
             new_rois_hats = np.zeros((test_size, n_discretization_steps, n_rois, n_scores))
             for step in range(n_discretization_steps):
@@ -333,9 +340,11 @@ if gradient_over_scores:
 
             things_to_test = np.zeros((n_scores, n_rois, test_size, 2))
             other_stuff = np.zeros((n_scores, n_rois))
+            if reg_method == "hierarchical":
+                all_coefs.append([])
             for score_idx in range(n_scores):
                 base_df = pd.DataFrame(dict(
-                    participant_id=np.repeat(np.arange(test_size)[:, np.newaxis], n_discretization_steps, axis=1).flatten(),
+                    participant_id=np.repeat(np.array(metadata["participant_id"])[:, np.newaxis], n_discretization_steps, axis=1).flatten(),
                     score=np.repeat(data["clinical"].cpu().detach().numpy()[:, score_idx, np.newaxis], n_discretization_steps, axis=1).flatten(),
                     score_mean_reconstruction=score_reconstructions.cpu().detach().numpy()[:, :, score_idx].flatten(),
                     score_std_reconstruction=clinical_std_mean.repeat(1, n_discretization_steps, 1).cpu().detach().numpy()[:, :, score_idx].flatten(),
@@ -343,6 +352,8 @@ if gradient_over_scores:
                 base_df["sampled_true_score_diff"] = base_df["sampled_score"] - base_df["score"]
                 base_df["reconstruction_true_score_diff"] = base_df["score_mean_reconstruction"] - base_df["score"]
                 base_df["sampled_reconstruction_score_diff"] = base_df["sampled_score"] - base_df["score_mean_reconstruction"]
+                if reg_method == "hierarchical":
+                    all_coefs[val_step].append(metadata_df[["participant_id", "site"]].copy())
                 for roi_idx in range(n_rois):
                     df = base_df.copy()
                     df["roi_avatar"] = new_rois_hats[:, :, roi_idx, score_idx].flatten()
@@ -355,7 +366,16 @@ if gradient_over_scores:
                     
                     # Use df with variable names
                     results = make_regression(df, "sampled_score", "roi_avatar", groups_name="participant_id", method=reg_method)
-                    pvalues[val_step, score_idx, roi_idx], coefs[val_step, score_idx, roi_idx] = results
+                    pvalues[val_step, score_idx, roi_idx], coefs[val_step, score_idx, roi_idx], all_betas = results
+                    if reg_method == "hierarchical":
+                        roi_name = rois_names[roi_idx].replace("&", "_").replace("-", "_")
+                        all_betas.rename(columns={"beta": roi_name}, inplace=True)
+                        all_coefs[val_step][score_idx] = all_coefs[val_step][score_idx].join(all_betas.set_index("participant_id"), on="participant_id")
+
+                        anova_ols = sm.OLS.from_formula("{} ~ C(site)".format(roi_name), data=all_coefs[val_step][score_idx]).fit()
+                        anova_res = anova_lm(anova_ols, type=2)
+                        anova_pvalues[val_step, score_idx, roi_idx] = anova_res["PR(>F)"]["C(site)"]
+                    
                     # things_to_test[score_idx, roi_idx, :, 0] = [value.to_numpy()[0] for value in res.random_effects.values()]
                     # things_to_test[score_idx, roi_idx, :, 1] = rois_hat.cpu().detach().numpy()[:, roi_idx] - data["rois"].cpu().detach().numpy()[:, roi_idx]
                     if score_idx in selected_scores and roi_idx in selected_rois:
@@ -370,6 +390,8 @@ if gradient_over_scores:
                     # subject_errors[:, score_idx, roi_idx] = res.params[2]
             # print(other_stuff.mean())
             # print(np.corrcoef(np.reshape(things_to_test, (n_scores * n_rois * test_size, 2)), rowvar=False))
+        print(all_coefs)
+        print(anova_pvalues)
         if plot_stuff:
             import matplotlib.pyplot as plt
             # plt.figure()
@@ -392,9 +414,13 @@ if gradient_over_scores:
             plt.show()
         np.save(os.path.join(args.dir_experiment, args.run, "results", dir_name, "pvalues.npy"), pvalues)
         np.save(os.path.join(args.dir_experiment, args.run, "results", dir_name, "coefs.npy"), coefs)
+        np.save(os.path.join(args.dir_experiment, args.run, "results", dir_name, "all_coefs.npy"), all_coefs)
+        np.save(os.path.join(args.dir_experiment, args.run, "results", dir_name, "anova_pvalues.npy"), anova_pvalues)
     else:
         pvalues = np.load(os.path.join(args.dir_experiment, args.run, "results", dir_name, "pvalues.npy"))
         coefs = np.load(os.path.join(args.dir_experiment, args.run, "results", dir_name, "coefs.npy"))
+        all_coefs = np.load(os.path.join(args.dir_experiment, args.run, "results", dir_name, "all_coefs.npy"))
+        anova_pvalues = np.load(os.path.join(args.dir_experiment, args.run, "results", dir_name, "anova_pvalues.npy"))
 
     significativity_thr = (0.05 / 444 / 7)
     
@@ -419,6 +445,15 @@ if gradient_over_scores:
         rois_idx = np.where(idx_sign[idx])
         print(len(rois_names[rois_idx]))
         print(len(np.unique(rois_names_no_metric[rois_idx])))
+
+    print(anova_pvalues.min())
+    print(anova_pvalues.max())
+    print(anova_pvalues.mean(0).min())
+    print(anova_pvalues.mean(0).max())
+    print(anova_pvalues[:, idx_sign].min())
+    print(anova_pvalues[:, idx_sign].max())
+    print(anova_pvalues[:, idx_sign].mean(0).min())
+    print(anova_pvalues[:, idx_sign].mean(0).max())
     
     # Plots to investigate coefs
     # import matplotlib.pyplot as plt
@@ -525,6 +560,6 @@ if compute_similarity_matrices:
                                             columns=clinical_names.tolist() + cov_names,
                                             orient="index")
                                     
-        rsa_results.to_csv(os.path.join(args.dir_experiment, args.run, "results", dir_name, "rsa_results_{}.tsv".format(latent_name)), sep="\t")
+        rsa_results.to_csv(os.path.join(args.dir_experiment, args.run, "results", "rsa_results_{}_{}_validation.tsv".format(latent_name, validation)), sep="\t")
         print(rsa_results)
     

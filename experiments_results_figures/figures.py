@@ -147,7 +147,7 @@ plot_meaningful_areas_per_score_per_metric = False
 # carefull, if True, opens as many fig tabs as number of clinical names * number of score + 3-4
 plot_latent_space = False
 plot_all_associations = False
-plot_radar = False
+plot_radar = True
 
 ####### test other scores
 if plot_all_scores:
@@ -240,7 +240,7 @@ rois_names = np.load(os.path.join(args.datasetdir, "rois_names.npy"), allow_pick
 params = {}
 params["euaims"] = {
     "validation": 20, "n_discretization_steps": 200,
-    "n_samples": 47, "K": 1000, "trust_level": 0.95,
+    "n_samples": 47, "K": 1000, "trust_level": 1,
     "method": "hierarchical"}
 params["hbn"] = {
     "validation": 20, "n_discretization_steps": 200,
@@ -337,7 +337,7 @@ textfont = textfont = dict(
             size=40,
             family="Droid Serif")
 inflated = True
-for n_most_connected in [3]:#[3, 4, 5]:
+for n_most_connected in [3]:
     color_palette = "Plotly"
     if n_most_connected > 3:
         color_palette = "Alphabet"
@@ -350,15 +350,15 @@ for n_most_connected in [3]:#[3, 4, 5]:
         # summed_values = [np.array(values_per_metric[metric])[np.array(targets_per_metric[metric]) == target].sum() for target in targets]
         # counts_target = dict(zip(targets, zip(counts, summed_values)))
         # counts_target = {k: v for k, v in sorted(counts_target.items(), key=lambda item: (item[1][0], item[1][1]), reverse=True)}
-        sorted_target = {t: v for t, v in sorted(zip(targets_per_metric[metric], pvalues_per_metric[metric]), key=lambda item: item[1], reverse=True)}
+        sorted_target = {t: v for t, v in sorted(zip(targets_per_metric[metric], pvalues_per_metric[metric]), key=lambda item: item[1])}
         min_connections = 2
         # thr_count_target = {key: value for key, value in list(counts_target.items())[:n_most_connected] if value[0] >= min_connections}
         
         # Plot for this metric
         thr_count_target = {key: value for key, value in list(sorted_target.items())[:10]}
         areas_to_plot = [rois_names_no_metric_unique[idx - len(clinical_names)] for idx in thr_count_target]
-        plot_areas(areas_to_plot, np.arange(len(areas_to_plot)) + 0.01, "Plotly", inflated)
-        plt.title("most meaningfull area for {}".format(metric))
+        # plot_areas(areas_to_plot, np.arange(len(areas_to_plot)) + 0.01, "Plotly", inflated)
+        # plt.title("most meaningfull area for {}".format(metric))
 
         thr_count_target = {key: value for key, value in list(sorted_target.items())[:n_most_connected]}
         areas_to_plot = [rois_names_no_metric_unique[idx - len(clinical_names)] for idx in thr_count_target]

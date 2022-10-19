@@ -214,13 +214,13 @@ def plot_areas(areas, colors, color_name="Plotly", inflated=False):
     plotting.plot_surf_roi(fsaverage['{}_left'.format(template)], roi_map=lh_map,
                        hemi='left', view='medial', cmap=mymap,
                        bg_map=fsaverage['sulc_left'], bg_on_data=True,
-                       axes=axs[0, 1], alpha=alpha,
+                       axes=axs[1, 0], alpha=alpha,
                        vmin=0, vmax=len(color_palette),
                        darkness=bg_darkness)
     plotting.plot_surf_roi(fsaverage['{}_right'.format(template)], roi_map=rh_map,
                        hemi='right', view='lateral', cmap=mymap,
                        bg_map=fsaverage['sulc_right'], bg_on_data=True,
-                       axes=axs[1, 0], alpha=alpha,
+                       axes=axs[0, 1], alpha=alpha,
                        vmin=0, vmax=len(color_palette),
                        darkness=bg_darkness)
     plotting.plot_surf_roi(fsaverage['{}_right'.format(template)], roi_map=rh_map,
@@ -229,4 +229,7 @@ def plot_areas(areas, colors, color_name="Plotly", inflated=False):
                        axes=axs[1, 1], alpha=alpha,
                        vmin=0, vmax=len(color_palette),
                        darkness=bg_darkness)
+    fontdict = {"fontfamily": "serif", "fontsize": 15}
+    axs[0, 0].set_title("Left hemisphere", fontdict=fontdict)
+    axs[0, 1].set_title("Right hemisphere", fontdict=fontdict)
     return fig

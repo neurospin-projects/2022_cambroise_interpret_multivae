@@ -34,17 +34,16 @@ class Residualizer:
         self.columns_to_residualize = columns_to_residualize
         self.estimators = []
         for col in columns_to_residualize:
-            print(formula.format(col))
             est = sm.OLS.from_formula(formula.format(col), data=df)
-            est.fit()
-            self.estimators.append(est)
+            res = est.fit()
+            self.estimators.append(res)
 
     def transform(self, df):
         if self.estimators is None:
             raise ValueError("You must fit the residualizer before transforming data")
         new_df = df.copy()
-        for col_idx, col in self.columns_to_residualize:
-            new_df[col] -= self.estimators[col_idx].predict(exog=df[self.by])
+        for col_idx, col in enumerate(self.columns_to_residualize):
+            new_df[col] -= self.estimators[col_idx].predict(exog=df[self.by_continuous + self.by_categorical])
         return new_df
 
     def fit_transform(self, df, columns_to_residualize):
@@ -55,8 +54,8 @@ class Residualizer:
         if self.estimators is None:
             raise ValueError("You must fit the residualizer before transforming data")
         new_df = df.copy()
-        for col_idx, col in self.columns_to_residualize:
-            new_df[col] += self.estimators[col_idx].predict(exog=df[self.by])
+        for col_idx, col in enumerate(self.columns_to_residualize):
+            new_df[col] += self.estimators[col_idx].predict(exog=df[self.by_continuous + self.by_categorical])
         return new_df
     
 
@@ -70,10 +69,10 @@ class MultimodalExperiment(BaseExperiment):
         self.num_modalities = flags.num_mods
         self.alphabet = alphabet
         self.residualize_by = dict()
-        self.residualize_by["rois"] = dict(
-            continuous=["age"],
-            categorical=["sex", "site"]
-        )
+        # self.residualize_by["rois"] = dict(
+        #     continuous=["age"],
+        #     categorical=["sex", "site"]
+        # )
         # self.plot_img_size = torch.Size((3, 28, 28))
         # self.font = ImageFont.truetype('FreeSerif.ttf', 38)
         self.flags.num_features = len(alphabet)
@@ -126,9 +125,19 @@ class MultimodalExperiment(BaseExperiment):
         for mod in self.modalities:
             scaler = StandardScaler()
             all_training_data = []
+            all_metadata = []
             for data in dataset:
                 if mod in data[0].keys():
                     all_training_data.append(data[0][mod])
+                    all_metadata.append(data[2])
+            if mod in self.residualizers:
+                print("resid before scaling")
+                all_training_data = np.asarray(all_training_data)
+                df = pd.DataFrame.from_records(all_metadata)
+                columns = np.load(os.path.join(self.flags.datasetdir, self.modalities[mod].names_file), allow_pickle=True)
+                columns = [col.replace("&", "_").replace("-", "_") for col in columns]
+                df = pd.concat([df, pd.DataFrame(all_training_data, columns=columns)], axis=1)
+                all_training_data = self.residualizers[mod].transform(df)[columns].values
             scaler.fit(all_training_data)
             scalers[mod] = scaler
         self.scalers = scalers
@@ -136,8 +145,8 @@ class MultimodalExperiment(BaseExperiment):
     def set_residualizers(self, dataset):
         if "residualize_by" not in vars(self):
             print("Residualize by doesnt exist")
+            self.residualizers = dict()
             pass
-        print("Setting residualizers !")
         residualizers = {}
         for mod in self.modalities:
             if mod in self.residualize_by.keys():
@@ -148,11 +157,11 @@ class MultimodalExperiment(BaseExperiment):
                         all_training_data.append(data[0][mod])
                         all_metadata.append(data[2])
                 all_training_data = np.asarray(all_training_data)
-                if mod in self.scalers.keys():
-                    all_training_data = self.scalers[mod].transform(all_training_data)
+                # if mod in self.scalers.keys():
+                #     all_training_data = self.scalers[mod].transform(all_training_data)
                 df = pd.DataFrame.from_records(all_metadata)
                 columns = np.load(os.path.join(self.flags.datasetdir, self.modalities[mod].names_file), allow_pickle=True)
-                columns = [col.replace("&", "and") for col in columns]
+                columns = [col.replace("&", "_").replace("-", "_") for col in columns]
                 df = pd.concat([df, pd.DataFrame(all_training_data, columns=columns)], axis=1)
                 residualizers[mod] = Residualizer(by_continuous=self.residualize_by[mod]["continuous"],
                                                   by_categorical=self.residualize_by[mod]["categorical"])
@@ -166,21 +175,23 @@ class MultimodalExperiment(BaseExperiment):
         manager = DataManager(self.flags.dataset, self.flags.datasetdir,
                               list(self.modalities), overwrite=True,
                               allow_missing_blocks=self.flags.allow_missing_blocks)
-        self.set_scalers(manager.train_dataset)
         self.set_residualizers(manager.train_dataset)
+        self.set_scalers(manager.train_dataset)
         self.transform = {mod: transforms.Compose([
             self.unsqueeze_0,
             scaler.transform,
-            self.residualizers[mod].transform,
             transforms.ToTensor(),
             torch.squeeze]) for mod, scaler in self.scalers.items()}
+        transform = {mod: residualizer.transform for mod, residualizer in self.residualizers.items()}
         # transform = None
         train = MultimodalDataset(manager.fetcher.train_input_path,
                                   manager.fetcher.train_metadata_path,
-                                  on_the_fly_transform=self.transform)
+                                  on_the_fly_transform=self.transform,
+                                  transform=transform)
         test = MultimodalDataset(manager.fetcher.test_input_path,
                                  manager.fetcher.test_metadata_path,
-                                 on_the_fly_transform=self.transform)
+                                 on_the_fly_transform=self.transform,
+                                 transform=transform)
         self.dataset_train = train
         self.dataset_test = test
         print(len(train))
