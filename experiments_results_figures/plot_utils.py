@@ -182,7 +182,14 @@ def plot_areas(areas, colors, color_name="Plotly", inflated=False):
     lh_map = np.zeros(destrieux["map_left"].shape)
     rh_map = np.zeros(destrieux["map_right"].shape)
     # mymap = mcolors.LinearSegmentedColormap.from_list("plotly", px.colors.qualitative.Plotly)
-    color_palette = getattr(px.colors.qualitative, color_name)
+    color_palette = getattr(px.colors.qualitative, color_name, None)
+    if color_palette is None:
+        mymap = plt.get_cmap(color_name)
+        if type(mymap) is mcolors.ListedColormap:
+            color_palette = mymap.colors
+        else:
+            color_palette = [mymap(idx / len(areas)) for idx in range(len(areas))]
+    n_colors = len(color_palette)
     mymap = mcolors.ListedColormap(color_palette)
     # bounds = np.arange(len(px.colors.qualitative.Alphabet) + 1)
     # norm = mcolors.BoundaryNorm(bounds, mymap.N)
@@ -209,27 +216,27 @@ def plot_areas(areas, colors, color_name="Plotly", inflated=False):
                        hemi='left', view='lateral', cmap=mymap,
                        bg_map=fsaverage['sulc_left'], bg_on_data=True,
                        axes=axs[0, 0], alpha=alpha,
-                       vmin=0, vmax=len(color_palette),
+                       vmin=0, vmax=n_colors,
                        darkness=bg_darkness)
     plotting.plot_surf_roi(fsaverage['{}_left'.format(template)], roi_map=lh_map,
                        hemi='left', view='medial', cmap=mymap,
                        bg_map=fsaverage['sulc_left'], bg_on_data=True,
-                       axes=axs[1, 0], alpha=alpha,
-                       vmin=0, vmax=len(color_palette),
+                       axes=axs[0, 1], alpha=alpha,
+                       vmin=0, vmax=n_colors,
                        darkness=bg_darkness)
     plotting.plot_surf_roi(fsaverage['{}_right'.format(template)], roi_map=rh_map,
                        hemi='right', view='lateral', cmap=mymap,
                        bg_map=fsaverage['sulc_right'], bg_on_data=True,
-                       axes=axs[0, 1], alpha=alpha,
-                       vmin=0, vmax=len(color_palette),
+                       axes=axs[1, 0], alpha=alpha,
+                       vmin=0, vmax=n_colors,
                        darkness=bg_darkness)
     plotting.plot_surf_roi(fsaverage['{}_right'.format(template)], roi_map=rh_map,
                        hemi='right', view='medial', cmap=mymap,
                        bg_map=fsaverage['sulc_right'], bg_on_data=True,
                        axes=axs[1, 1], alpha=alpha,
-                       vmin=0, vmax=len(color_palette),
+                       vmin=0, vmax=n_colors,
                        darkness=bg_darkness)
     fontdict = {"fontfamily": "serif", "fontsize": 15}
-    axs[0, 0].set_title("Left hemisphere", fontdict=fontdict)
-    axs[0, 1].set_title("Right hemisphere", fontdict=fontdict)
+    # axs[0, 0].set_title("Left hemisphere", fontdict=fontdict)
+    # axs[0, 1].set_title("Right hemisphere", fontdict=fontdict)
     return fig

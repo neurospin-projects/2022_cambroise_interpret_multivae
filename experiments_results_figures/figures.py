@@ -147,7 +147,7 @@ plot_meaningful_areas_per_score_per_metric = False
 # carefull, if True, opens as many fig tabs as number of clinical names * number of score + 3-4
 plot_latent_space = False
 plot_all_associations = False
-plot_radar = True
+plot_radar = False
 
 ####### test other scores
 if plot_all_scores:
@@ -261,6 +261,22 @@ stat_params = {
     "method": reg_method
 }
 
+print("Loading data...")
+flags_file = os.path.join(args.dir_experiment, args.run, "flags.rar")
+if not os.path.isfile(flags_file):
+    raise ValueError("You need first to train the model.")
+alphabet_file = os.path.join(os.getcwd(), "alphabet.json")
+checkpoints_files = glob.glob(
+    os.path.join(args.dir_experiment, args.run, "checkpoints", "*", "mm_vae"))
+if len(checkpoints_files) == 0:
+    raise ValueError("You need first to train the model.")
+checkpoints_files = sorted(
+    checkpoints_files, key=lambda path: int(path.split(os.sep)[-2]))
+checkpoint_file = checkpoints_files[-1]
+print(f"Restoring weights: {checkpoint_file}")
+exp, flags = MultimodalExperiment.get_experiment(
+    flags_file, alphabet_file, checkpoint_file)
+
 dir_name = "_".join(["_".join([key, str(value)]) for key, value in stat_params.items()])
 path_to_save_fig = os.path.join(
     args.dir_experiment, args.run, "figures", dir_name + "_pvalue_select_thr_{}".format(trust_level))
@@ -285,12 +301,14 @@ metrics = ["thickness", "meancurv", "area"]
 sources_per_metric = {}
 targets_per_metric = {}
 values_per_metric = {}
+signed_values_per_metric = {}
 colors_per_metric = {}
 pvalues_per_metric = {}
 for metric in metrics:
     sources_per_metric[metric] = []
     targets_per_metric[metric] = []
     values_per_metric[metric] = []
+    signed_values_per_metric[metric] = []
     colors_per_metric[metric] = []
     pvalues_per_metric[metric] = []
     for idx, score in enumerate(clinical_names):
@@ -301,6 +319,7 @@ for metric in metrics:
                 sources_per_metric[metric].append(idx)
                 targets_per_metric[metric].append(roi_idx + len(clinical_names))
                 values_per_metric[metric].append(np.abs(coef))
+                signed_values_per_metric[metric].append(coef)
                 colors_per_metric[metric].append("rgba(255,0,0,0.4)" if coef > 0 else "rgba(0,0,255,0.4)")
                 pvalues_per_metric[metric].append(pvalues[:, idx, roi_with_metric_idx].mean())
         if plot_meaningful_areas_per_score_per_metric:
@@ -316,11 +335,11 @@ plotting_clinical_names = {
     "euaims": {
         "rbs total": "RBS",
         "srs rawscore": "SRS",
-        "adhd hyperimpul parent": "ADHD hyperimpul",
-        "adhd inattentiv parent": "ADHD inattentiv",
+        "adhd hyperimpul parent": "ADHD hi",
+        "adhd inattentiv parent": "ADHD inat",
         "dawba anx": "DAWBA anx",
         "dawba dep": "DAWBA dep",
-        "dawba behavdis": "DAWBA behavdis"
+        "dawba behavdis": "DAWBA bd"
     },
     "hbn": {
         "SCARED P Total": "Scared p",
@@ -334,13 +353,15 @@ plotting_clinical_names = {
 }
 
 textfont = textfont = dict(
-            size=40,
+            size=44,
             family="Droid Serif")
 inflated = True
 for n_most_connected in [3]:
     color_palette = "Plotly"
     if n_most_connected > 3:
-        color_palette = "Alphabet"
+        color_palette = "Set3"
+    if n_most_connected > 4:
+        color_palette = "Aplhabet"
 
     all_areas_to_plot = []
     # n_areas_to_plot = 0
@@ -448,11 +469,37 @@ for n_most_connected in [3]:
             print("No meaningfully mostly connected rois for {}".format(metric))
     n_areas_to_plot = len(all_areas_to_plot)
     plot_areas(all_areas_to_plot, np.arange(n_areas_to_plot) + 0.01, color_palette, inflated)
+    plt.savefig(os.path.join(path_to_save_fig, "most_connected_areas"))
+
+color_palette = "Paired"
+plt.rcParams.update({'font.size': 18, "font.family": "serif"})
 idx_of_srs = clinical_names.index(srs_name[name_dataset_train])
-areas = [rois_names_no_metric_unique[area_idx - len(clinical_names)] for idx, area_idx in enumerate(targets_per_metric["thickness"]) if sources_per_metric["thickness"][idx] == idx_of_srs]
-print(areas)
-plot_areas(areas, np.arange(len(areas)) + 0.01, color_palette, inflated)
-plt.savefig(os.path.join(path_to_save_fig, "most_connected_areas"))
+for score_idx, score in [(idx_of_srs, clinical_names[idx_of_srs])]:
+    areas = [rois_names_no_metric_unique[area_idx - len(clinical_names)] for idx, area_idx in enumerate(targets_per_metric["thickness"]) if sources_per_metric["thickness"][idx] == score_idx]
+    areas_indices = np.array([rois_names.tolist().index(area + "_thickness") for area in areas])
+    print(areas_indices)
+    print(rois_names[areas_indices])
+    values = [value for idx, value in enumerate(signed_values_per_metric["thickness"]) if sources_per_metric["thickness"][idx] == score_idx]
+    score_scale = exp.scalers["clinical"].scale_[score_idx]
+    roi_scales = exp.scalers["rois"].scale_[areas_indices]
+    # true_values = (roi_scales / score_scale * coefs_thr[:, score_idx, areas_indices].mean(0))
+    print("Number of significative rois in thickness for {} : ".format(score), len(areas))
+    print(areas)
+    plot_areas(areas, np.arange(26) + 0.01, color_palette, inflated)
+    fig = plt.figure(figsize=(10, 7.5))
+    ax = fig.add_subplot(111)
+    cmap = plt.get_cmap(color_palette)
+    ax.barh(areas, values, color=[cmap(idx / len(areas)) for idx in range(len(areas))], edgecolor=[cmap(idx / len(areas)+0.01) for idx in range(len(areas))])
+    # plt.xticks(ticks=range(len(areas)), labels=areas, rotation=65)
+    # ax.set_ytickslabels(areas)
+    ax.tick_params(axis="y", which="both", length=0)
+    ax.tick_params(axis="x", which="both", labelsize=12)
+    # ax.set_xticks([])
+    # ax.set_yticks([])
+    # plt.setp(ticks, visible=False)
+    plt.tight_layout()
+    # fig = go.Bar(y=values, x=areas, colorscale="Jet")
+    # fig.show()
 
 ############################# Meaningful associations plot
 if plot_all_associations:
@@ -474,22 +521,6 @@ if plot_all_associations:
 
 ##################################### Latent space plots
 if plot_latent_space:
-    print("Loading data...")
-    flags_file = os.path.join(args.dir_experiment, args.run, "flags.rar")
-    if not os.path.isfile(flags_file):
-        raise ValueError("You need first to train the model.")
-    alphabet_file = os.path.join(os.getcwd(), "alphabet.json")
-    checkpoints_files = glob.glob(
-        os.path.join(args.dir_experiment, args.run, "checkpoints", "*", "mm_vae"))
-    if len(checkpoints_files) == 0:
-        raise ValueError("You need first to train the model.")
-    checkpoints_files = sorted(
-        checkpoints_files, key=lambda path: int(path.split(os.sep)[-2]))
-    checkpoint_file = checkpoints_files[-1]
-    print(f"Restoring weights: {checkpoint_file}")
-    exp, flags = MultimodalExperiment.get_experiment(
-        flags_file, alphabet_file, checkpoint_file)
-
     print(len(exp.dataset_train))
     if "allow_missing_blocks" in vars(exp.flags) and exp.flags.allow_missing_blocks:
         sampler = MissingModalitySampler(exp.dataset_train, batch_size=2048)
