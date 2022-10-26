@@ -4,6 +4,7 @@ import glob
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
+import matplotlib.colors as mcolors
 from scipy import stats
 import plotly.graph_objects as go
 import plotly.express as px
@@ -57,107 +58,110 @@ kwargs = {}
 
 name_dataset_train = args.run.split("_")[0]
 
-stuff_to_hist = []
-for cohort in cohorts:
-    print(cohort)
-    path = args.datasetdir.replace(name_dataset_train, "{}").format(cohort)
-    manager = DataManager(dataset=cohort, datasetdir=path,
-                        modalities=modalities, overwrite=True,
-                        allow_missing_blocks=allow_missing_blocks[cohort],
-                        **kwargs)
-
-    if allow_missing_blocks[cohort]:
-        sampler = MissingModalitySampler(manager["train"], batch_size=batch_size)
-        loader = DataLoader(manager["train"], batch_sampler=sampler, num_workers=8)
-        sampler_test = MissingModalitySampler(manager["test"], batch_size=batch_size)
-        loader_test = DataLoader(manager["test"], batch_sampler=sampler_test, num_workers=8) 
-    else:
-        loader = DataLoader(manager["train"], shuffle=True, batch_size=batch_size, num_workers=8)
-        loader_test = DataLoader(manager["test"], shuffle=True, batch_size=batch_size, num_workers=8)
-
-    all_clinical_data = []
-    all_metadata = []
-    for data in loader:
-        if "clinical" in data[0].keys():
-            all_clinical_data.append(data[0]["clinical"])
-            all_metadata.append(pd.DataFrame(data[2]))
-
-    for data in loader_test:
-        if "clinical" in data[0].keys():
-            all_clinical_data.append(data[0]["clinical"])
-            all_metadata.append(pd.DataFrame(data[2]))
-
-    X = torch.cat(all_clinical_data, dim=0).cpu().detach().numpy()
-    metadata = pd.concat(all_metadata, axis=0)
-
-    print(X.shape)
-
-    clinical_names = np.load(os.path.join(path, "clinical_names.npy"), allow_pickle=True)
-
-    index_of_srs = np.where(clinical_names == srs_name[cohort])[0][0]
-
-    if "asd" in metadata.columns:
-        bins = range(int(X[:, index_of_srs].min()), int(X[:, index_of_srs].max()), 2)
-        print(bins)
-        control_scores = X[:, index_of_srs][metadata["asd"] == 1]
-        asd_scores = X[:, index_of_srs][metadata["asd"] == 2]
-        stuff_to_hist.append(control_scores)
-        stuff_to_hist.append(asd_scores)
-    else:
-        stuff_to_hist.append(X[:, index_of_srs])
-    print("Stats for {}".format(clinical_names[index_of_srs]))
-    print("Minimum value : {}".format(min(X[:, index_of_srs])))
-    print("Maximum value : {}".format(max(X[:, index_of_srs])))
-    print("1st quantile : {}".format(np.quantile(X[:, index_of_srs], 0.25)))
-    print("3rd quantile : {}".format(np.quantile(X[:, index_of_srs], 0.75)))
-    print("Median value : {}".format(np.median(X[:, index_of_srs])))
-    print("Average value : {}".format(np.mean(X[:, index_of_srs])))
-    print("Standard deviation : {}".format(np.std(X[:, index_of_srs])))
-    print("Only entire values : {}".format(np.array_equal(X[:, index_of_srs], X[:, index_of_srs] // 1)))
-    print("Correlation wih age : {}".format(np.corrcoef(np.concatenate((X[:, index_of_srs][:, np.newaxis], metadata[["age"]].values), axis=1), rowvar=False)[0, 1]))
-    print("Correlation wih sex : {}".format(np.corrcoef(np.concatenate((X[:, index_of_srs][:, np.newaxis], metadata[["sex"]].values), axis=1), rowvar=False)[0, 1]))
-    if "asd" in metadata.columns:
-        print("Correlation wih diagnostic : {}".format(np.corrcoef(np.concatenate((X[:, index_of_srs][:, np.newaxis], metadata[["asd"]].values), axis=1), rowvar=False)[0, 1]))
-    print("\n")
-
-alpha = 0.5
-fig_width = 10
-plt.figure(figsize=(fig_width, 3/4 * fig_width))
-label = ("EUAIMS", "HBN")
-color = (control_color, hbn_color)
-if len(stuff_to_hist) == 3:
-    label = ("EUAIMS Control", "EUAIMS ASD", "HBN")
-    color = (control_color, asd_color, hbn_color)
-plt.hist(stuff_to_hist,
-        alpha=alpha, bins=20, color=color,
-        density=True, label=label)
-for x in stuff_to_hist:
-    kde = stats.gaussian_kde(x)
-    xx = np.linspace(x.min(), x.max(), 1000)
-    plt.plot(xx, kde(xx))
-plt.xlabel("SRS", size=13, family="serif")
-plt.ylabel("Proportion of participants", size=13, family="serif")
-plt.legend(title="Cohort", fontsize=12, prop={"family": "serif"},
-            title_fontproperties={"family": "serif", "size": 13})
-
-
 plot_all_scores = False
+plot_comparing_srs_hist = False
 plot_rsa = False
 plot_meaningful_areas_per_score_per_metric = False
 # carefull, if True, opens as many fig tabs as number of clinical names * number of score + 3-4
 plot_latent_space = False
 plot_all_associations = False
 plot_radar = False
+load_exp = False
+
+if plot_comparing_srs_hist:
+    stuff_to_hist = []
+    for cohort in cohorts:
+        print(cohort)
+        path = args.datasetdir.replace(name_dataset_train, "{}").format(cohort)
+        manager = DataManager(dataset=cohort, datasetdir=path,
+                            modalities=modalities, overwrite=True,
+                            allow_missing_blocks=allow_missing_blocks[cohort],
+                            **kwargs)
+
+        if allow_missing_blocks[cohort]:
+            sampler = MissingModalitySampler(manager["train"], batch_size=batch_size)
+            loader = DataLoader(manager["train"], batch_sampler=sampler, num_workers=8)
+            sampler_test = MissingModalitySampler(manager["test"], batch_size=batch_size)
+            loader_test = DataLoader(manager["test"], batch_sampler=sampler_test, num_workers=8) 
+        else:
+            loader = DataLoader(manager["train"], shuffle=True, batch_size=batch_size, num_workers=8)
+            loader_test = DataLoader(manager["test"], shuffle=True, batch_size=batch_size, num_workers=8)
+
+        all_clinical_data = []
+        all_metadata = []
+        for data in loader:
+            if "clinical" in data[0].keys():
+                all_clinical_data.append(data[0]["clinical"])
+                all_metadata.append(pd.DataFrame(data[2]))
+
+        for data in loader_test:
+            if "clinical" in data[0].keys():
+                all_clinical_data.append(data[0]["clinical"])
+                all_metadata.append(pd.DataFrame(data[2]))
+
+        X = torch.cat(all_clinical_data, dim=0).cpu().detach().numpy()
+        metadata = pd.concat(all_metadata, axis=0)
+
+        print(X.shape)
+
+        clinical_names = np.load(os.path.join(path, "clinical_names.npy"), allow_pickle=True)
+
+        index_of_srs = np.where(clinical_names == srs_name[cohort])[0][0]
+
+        if "asd" in metadata.columns:
+            bins = range(int(X[:, index_of_srs].min()), int(X[:, index_of_srs].max()), 2)
+            print(bins)
+            control_scores = X[:, index_of_srs][metadata["asd"] == 1]
+            asd_scores = X[:, index_of_srs][metadata["asd"] == 2]
+            stuff_to_hist.append(control_scores)
+            stuff_to_hist.append(asd_scores)
+        else:
+            stuff_to_hist.append(X[:, index_of_srs])
+        print("Stats for {}".format(clinical_names[index_of_srs]))
+        print("Minimum value : {}".format(min(X[:, index_of_srs])))
+        print("Maximum value : {}".format(max(X[:, index_of_srs])))
+        print("1st quantile : {}".format(np.quantile(X[:, index_of_srs], 0.25)))
+        print("3rd quantile : {}".format(np.quantile(X[:, index_of_srs], 0.75)))
+        print("Median value : {}".format(np.median(X[:, index_of_srs])))
+        print("Average value : {}".format(np.mean(X[:, index_of_srs])))
+        print("Standard deviation : {}".format(np.std(X[:, index_of_srs])))
+        print("Only entire values : {}".format(np.array_equal(X[:, index_of_srs], X[:, index_of_srs] // 1)))
+        print("Correlation wih age : {}".format(np.corrcoef(np.concatenate((X[:, index_of_srs][:, np.newaxis], metadata[["age"]].values), axis=1), rowvar=False)[0, 1]))
+        print("Correlation wih sex : {}".format(np.corrcoef(np.concatenate((X[:, index_of_srs][:, np.newaxis], metadata[["sex"]].values), axis=1), rowvar=False)[0, 1]))
+        if "asd" in metadata.columns:
+            print("Correlation wih diagnostic : {}".format(np.corrcoef(np.concatenate((X[:, index_of_srs][:, np.newaxis], metadata[["asd"]].values), axis=1), rowvar=False)[0, 1]))
+        print("\n")
+
+    alpha = 0.5
+    fig_width = 10
+    plt.figure(figsize=(fig_width, 3/4 * fig_width))
+    label = ("EUAIMS", "HBN")
+    color = (control_color, hbn_color)
+    if len(stuff_to_hist) == 3:
+        label = ("EUAIMS Control", "EUAIMS ASD", "HBN")
+        color = (control_color, asd_color, hbn_color)
+    plt.hist(stuff_to_hist,
+            alpha=alpha, bins=20, color=color,
+            density=True, label=label)
+    for x in stuff_to_hist:
+        kde = stats.gaussian_kde(x)
+        xx = np.linspace(x.min(), x.max(), 1000)
+        plt.plot(xx, kde(xx))
+    plt.xlabel("SRS", size=13, family="serif")
+    plt.ylabel("Proportion of participants", size=13, family="serif")
+    plt.legend(title="Cohort", fontsize=12, prop={"family": "serif"},
+                title_fontproperties={"family": "serif", "size": 13})
+
 
 ####### test other scores
 if plot_all_scores:
     clinical_names = np.load(os.path.join(args.datasetdir, "clinical_names.npy"), allow_pickle=True)
-    manager = DataManager(dataset="euaims", datasetdir=path,
+    manager = DataManager(dataset=name_dataset_train, datasetdir=path,
                         modalities=modalities, overwrite=True,
-                        allow_missing_blocks=allow_missing_blocks["euaims"],
+                        allow_missing_blocks=allow_missing_blocks[name_dataset_train],
                         **kwargs)
 
-    if allow_missing_blocks["euaims"]:
+    if allow_missing_blocks[name_dataset_train]:
         sampler = MissingModalitySampler(manager["train"], batch_size=batch_size)
         loader = DataLoader(manager["train"], batch_sampler=sampler, num_workers=8)
         sampler_test = MissingModalitySampler(manager["test"], batch_size=batch_size)
@@ -244,12 +248,12 @@ params["euaims"] = {
     "method": "hierarchical"}
 params["hbn"] = {
     "validation": 20, "n_discretization_steps": 200,
-    "n_samples": 150, "K": 1000, "trust_level": 1,
+    "n_samples": 150, "K": 1000, "trust_level": 0.95,
     "method": "hierarchical"}
 validation = params[name_dataset_train]["validation"]
 n_discretization_steps = params[name_dataset_train]["n_discretization_steps"]
 n_samples = params[name_dataset_train]["n_samples"]
-val_size = n_samples / (len(manager["train"]) + len(manager["test"]))
+# val_size = n_samples / (len(manager["train"]) + len(manager["test"]))
 K = params[name_dataset_train]["K"]
 trust_level = params[name_dataset_train]["trust_level"]
 reg_method = params[name_dataset_train]["method"]
@@ -261,21 +265,22 @@ stat_params = {
     "method": reg_method
 }
 
-print("Loading data...")
-flags_file = os.path.join(args.dir_experiment, args.run, "flags.rar")
-if not os.path.isfile(flags_file):
-    raise ValueError("You need first to train the model.")
-alphabet_file = os.path.join(os.getcwd(), "alphabet.json")
-checkpoints_files = glob.glob(
-    os.path.join(args.dir_experiment, args.run, "checkpoints", "*", "mm_vae"))
-if len(checkpoints_files) == 0:
-    raise ValueError("You need first to train the model.")
-checkpoints_files = sorted(
-    checkpoints_files, key=lambda path: int(path.split(os.sep)[-2]))
-checkpoint_file = checkpoints_files[-1]
-print(f"Restoring weights: {checkpoint_file}")
-exp, flags = MultimodalExperiment.get_experiment(
-    flags_file, alphabet_file, checkpoint_file)
+if load_exp:
+    print("Loading data...")
+    flags_file = os.path.join(args.dir_experiment, args.run, "flags.rar")
+    if not os.path.isfile(flags_file):
+        raise ValueError("You need first to train the model.")
+    alphabet_file = os.path.join(os.getcwd(), "alphabet.json")
+    checkpoints_files = glob.glob(
+        os.path.join(args.dir_experiment, args.run, "checkpoints", "*", "mm_vae"))
+    if len(checkpoints_files) == 0:
+        raise ValueError("You need first to train the model.")
+    checkpoints_files = sorted(
+        checkpoints_files, key=lambda path: int(path.split(os.sep)[-2]))
+    checkpoint_file = checkpoints_files[-1]
+    print(f"Restoring weights: {checkpoint_file}")
+    exp, flags = MultimodalExperiment.get_experiment(
+        flags_file, alphabet_file, checkpoint_file)
 
 dir_name = "_".join(["_".join([key, str(value)]) for key, value in stat_params.items()])
 path_to_save_fig = os.path.join(
@@ -342,13 +347,13 @@ plotting_clinical_names = {
         "dawba behavdis": "DAWBA bd"
     },
     "hbn": {
-        "SCARED P Total": "Scared p",
-        "SDQ Hyperactivity": "SDQ hyperactiv",
+        "SCARED P Total": "SCARED",
+        "SDQ Hyperactivity": "SDQ ha",
         "SRS Total": "SRS",
         "CBCL WD": "CBCL wd",
         "CBCL AB": "CBCL ab",
         "CBCL AP": "CBCL ap",
-        "ARI P Total Score": "ARI p"
+        "ARI P Total Score": "ARI"
     }
 }
 
@@ -361,7 +366,7 @@ for n_most_connected in [3]:
     if n_most_connected > 3:
         color_palette = "Set3"
     if n_most_connected > 4:
-        color_palette = "Aplhabet"
+        color_palette = "Alphabet"
 
     all_areas_to_plot = []
     # n_areas_to_plot = 0
@@ -471,29 +476,46 @@ for n_most_connected in [3]:
     plot_areas(all_areas_to_plot, np.arange(n_areas_to_plot) + 0.01, color_palette, inflated)
     plt.savefig(os.path.join(path_to_save_fig, "most_connected_areas"))
 
-color_palette = "Paired"
-plt.rcParams.update({'font.size': 18, "font.family": "serif"})
+plt.rcParams.update({'font.size': 20, "font.family": "serif"})
 idx_of_srs = clinical_names.index(srs_name[name_dataset_train])
 for score_idx, score in [(idx_of_srs, clinical_names[idx_of_srs])]:
     areas = [rois_names_no_metric_unique[area_idx - len(clinical_names)] for idx, area_idx in enumerate(targets_per_metric["thickness"]) if sources_per_metric["thickness"][idx] == score_idx]
     areas_indices = np.array([rois_names.tolist().index(area + "_thickness") for area in areas])
-    print(areas_indices)
-    print(rois_names[areas_indices])
     values = [value for idx, value in enumerate(signed_values_per_metric["thickness"]) if sources_per_metric["thickness"][idx] == score_idx]
-    score_scale = exp.scalers["clinical"].scale_[score_idx]
-    roi_scales = exp.scalers["rois"].scale_[areas_indices]
+    # score_scale = exp.scalers["clinical"].scale_[score_idx]
+    # roi_scales = exp.scalers["rois"].scale_[areas_indices]
     # true_values = (roi_scales / score_scale * coefs_thr[:, score_idx, areas_indices].mean(0))
+    if len(areas) <= 6:
+        color_palette = "tab10"
+    elif len(areas) <= 9:
+        color_palette = "Plotly"
+    elif len(areas) <= 10:
+        color_palette = "tab10"
+    elif len(areas) <= 12:
+        color_palette = "Paired"
+    else:
+        color_palette = "Alphabet"
     print("Number of significative rois in thickness for {} : ".format(score), len(areas))
     print(areas)
-    plot_areas(areas, np.arange(26) + 0.01, color_palette, inflated)
+    plot_areas(areas, np.arange(len(areas)) + 0.01, color_palette, inflated)
     fig = plt.figure(figsize=(10, 7.5))
     ax = fig.add_subplot(111)
-    cmap = plt.get_cmap(color_palette)
-    ax.barh(areas, values, color=[cmap(idx / len(areas)) for idx in range(len(areas))], edgecolor=[cmap(idx / len(areas)+0.01) for idx in range(len(areas))])
+    colors = getattr(px.colors.qualitative, color_palette, None)
+    if colors is None:
+        mymap = plt.get_cmap(color_palette)
+        if type(mymap) is mcolors.ListedColormap:
+            colors = mymap.colors
+        else:
+            colors = [mymap(idx / len(areas)) for idx in range(len(areas))]
+    mymap = mcolors.ListedColormap(colors)
+    ax.barh(areas, values, color=[mymap(idx / len(areas)) for idx in range(len(areas))])
     # plt.xticks(ticks=range(len(areas)), labels=areas, rotation=65)
     # ax.set_ytickslabels(areas)
     ax.tick_params(axis="y", which="both", length=0)
-    ax.tick_params(axis="x", which="both", labelsize=12)
+    ticks = ax.get_xticks()
+    ticks = ticks[::2]
+    ax.set_xticks(ticks)
+    ax.tick_params(axis="x", which="both", labelsize=15)
     # ax.set_xticks([])
     # ax.set_yticks([])
     # plt.setp(ticks, visible=False)

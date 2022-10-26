@@ -189,7 +189,7 @@ def plot_areas(areas, colors, color_name="Plotly", inflated=False):
             color_palette = mymap.colors
         else:
             color_palette = [mymap(idx / len(areas)) for idx in range(len(areas))]
-    n_colors = len(color_palette)
+    n_colors = len(areas)
     mymap = mcolors.ListedColormap(color_palette)
     # bounds = np.arange(len(px.colors.qualitative.Alphabet) + 1)
     # norm = mcolors.BoundaryNorm(bounds, mymap.N)

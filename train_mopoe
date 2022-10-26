@@ -12,6 +12,8 @@ echo "TMPDIR: $TMPDIR"
 #eval "$(conda shell.bash hook)"
 #conda activate mopoe
 #echo "CONDA_PREFIX: $CONDA_PREFIX"
+# n_epochs euaim : 1500
+# n_epochs hbn with missing : 550
 
 METHOD="joint_elbo"  # NOTE: valid options are "joint_elbo", "poe", and "moe"
 LIKELIHOOD="normal"
@@ -35,7 +37,7 @@ python main.py \
             --data_multiplications=1 \
             --num_hidden_layer_encoder=1 \
             --num_hidden_layer_decoder=0 \
-            --end_epoch=1500 \
+            --end_epoch=550 \
             -dr 0.0 \
             --initial_out_logvar=-3 \
             --learn_output_scale \

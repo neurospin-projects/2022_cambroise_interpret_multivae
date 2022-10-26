@@ -69,12 +69,14 @@ print(f"Restoring weights: {checkpoint_file}")
 exp, flags = MultimodalExperiment.get_experiment(
     flags_file, alphabet_file, checkpoint_file)
 
+
 print(len(exp.dataset_train))
+print(len(exp.dataset_test))
 if "allow_missing_blocks" in vars(exp.flags) and exp.flags.allow_missing_blocks:
-    sampler = MissingModalitySampler(exp.dataset_train, batch_size=2048)
+    sampler = MissingModalitySampler(exp.dataset_train, batch_size=4096)
     loader_train = DataLoader(exp.dataset_train, batch_sampler=sampler, num_workers=8)
 else:
-    loader_train = DataLoader(exp.dataset_train, shuffle=True, batch_size=2048, num_workers=8)
+    loader_train = DataLoader(exp.dataset_train, shuffle=True, batch_size=4096, num_workers=8)
 modalities = ["clinical", "rois"]
 
 dataset_test = exp.dataset_test
@@ -93,10 +95,10 @@ if args.test is not None:
         on_the_fly_transform=transform)
     dataset_test = manager.train_dataset
 if "allow_missing_blocks" in vars(exp.flags) and exp.flags.allow_missing_blocks:
-    sampler_test = MissingModalitySampler(dataset_test, batch_size=512)
+    sampler_test = MissingModalitySampler(dataset_test, batch_size=1024)
     loader_test = DataLoader(dataset_test, batch_sampler=sampler_test, num_workers=8)
 else:
-    loader_test = DataLoader(dataset_test, shuffle=True, batch_size=512, num_workers=8)
+    loader_test = DataLoader(dataset_test, shuffle=True, batch_size=1024, num_workers=8)
 
 for batch in loader_train:
     data = batch[0]
@@ -128,11 +130,11 @@ gradient_over_scores = True
 params = {}
 params["euaims"] = {
     "validation": 20, "n_discretization_steps": 200,
-    "n_samples": 48, "K": 1000, "trust_level": 1,
+    "n_samples": 47, "K": 1000, "trust_level": 1,
     "method": "hierarchical"}
 params["hbn"] = {
-    "validation": 20, "n_discretization_steps": 200,
-    "n_samples": 150, "K": 1000, "trust_level": 1,
+    "validation": 1, "n_discretization_steps": 200,
+    "n_samples": 301, "K": 1000, "trust_level": 1,
     "method": "hierarchical"}
 validation = params[name_dataset_train]["validation"]
 n_discretization_steps = params[name_dataset_train]["n_discretization_steps"]
@@ -206,8 +208,8 @@ if gradient_over_scores:
                                 shuffle=True, num_workers=8)
             else:
                 sampler_test = MissingModalitySampler(dataset_test, batch_size=n_samples,
-                                                    stratify=["age", "sex", "site"],
-                                                    discretize=["age"])
+                                                      stratify=["age", "sex", "site"],
+                                                      discretize=["age"])
                 loader_test = DataLoader(dataset_test, batch_sampler=sampler_test, num_workers=8)
             batch_idx = 0
             data = {}
@@ -390,8 +392,6 @@ if gradient_over_scores:
                     # subject_errors[:, score_idx, roi_idx] = res.params[2]
             # print(other_stuff.mean())
             # print(np.corrcoef(np.reshape(things_to_test, (n_scores * n_rois * test_size, 2)), rowvar=False))
-        print(all_coefs)
-        print(anova_pvalues)
         if plot_stuff:
             import matplotlib.pyplot as plt
             # plt.figure()
@@ -419,14 +419,15 @@ if gradient_over_scores:
     else:
         pvalues = np.load(os.path.join(args.dir_experiment, args.run, "results", dir_name, "pvalues.npy"))
         coefs = np.load(os.path.join(args.dir_experiment, args.run, "results", dir_name, "coefs.npy"))
-        all_coefs = np.load(os.path.join(args.dir_experiment, args.run, "results", dir_name, "all_coefs.npy"))
-        anova_pvalues = np.load(os.path.join(args.dir_experiment, args.run, "results", dir_name, "anova_pvalues.npy"))
+        if os.path.exists(os.path.join(args.dir_experiment, args.run, "results", dir_name, "all_coefs.npy")):
+            all_coefs = np.load(os.path.join(args.dir_experiment, args.run, "results", dir_name, "all_coefs.npy"), allow_pickle=True)
+            anova_pvalues = np.load(os.path.join(args.dir_experiment, args.run, "results", dir_name, "anova_pvalues.npy"))
 
     significativity_thr = (0.05 / 444 / 7)
     
     print((pvalues < significativity_thr).sum())
 
-    for prop in np.linspace(0.5, 1, 6):
+    for prop in np.linspace(0, 1, 11):
         print(prop)
         print(((pvalues < significativity_thr).sum(0) >= validation*prop).sum())
         print(((pvalues < significativity_thr).sum(0) >= validation*prop).sum(1))
@@ -446,14 +447,15 @@ if gradient_over_scores:
         print(len(rois_names[rois_idx]))
         print(len(np.unique(rois_names_no_metric[rois_idx])))
 
-    print(anova_pvalues.min())
-    print(anova_pvalues.max())
-    print(anova_pvalues.mean(0).min())
-    print(anova_pvalues.mean(0).max())
-    print(anova_pvalues[:, idx_sign].min())
-    print(anova_pvalues[:, idx_sign].max())
-    print(anova_pvalues[:, idx_sign].mean(0).min())
-    print(anova_pvalues[:, idx_sign].mean(0).max())
+    if os.path.exists(os.path.join(args.dir_experiment, args.run, "results", dir_name, "all_coefs.npy")):
+        print(anova_pvalues.min())
+        print(anova_pvalues.max())
+        print(anova_pvalues.mean(0).min())
+        print(anova_pvalues.mean(0).max())
+        print(anova_pvalues[:, idx_sign].min())
+        print(anova_pvalues[:, idx_sign].max())
+        print(anova_pvalues[:, idx_sign].mean(0).min())
+        print(anova_pvalues[:, idx_sign].mean(0).max())
     
     # Plots to investigate coefs
     # import matplotlib.pyplot as plt
@@ -471,70 +473,71 @@ if gradient_over_scores:
     #                 plt.title("Histogram of effects of {} on {}".format(score, metric))
     # plt.show()
 ##################### RSA
-compute_similarity_matrices = True
+compute_similarity_matrices = False
+validation = 20
+n_samples = len(dataset_test)
+print(n_samples)
 if compute_similarity_matrices:
     cov_names = ["age", "sex", "site"]
     if name_dataset_train == "euaims" or args.test == "euaims":
         cov_names.append("fsiq")
     latent_names = ["joint", "clinical_style", "rois_style"]
-    for latent_name in latent_names:
-        correlations = np.zeros((validation, len(clinical_names) + len(cov_names)))
-        kendalltaus = np.zeros((validation, len(clinical_names) + len(cov_names)))
-        kendallpvalues = np.zeros((validation, len(clinical_names) + len(cov_names)))
-        for val_step in range(validation):
-            if args.test is not None:
-                dataset_test = manager.train_dataset[val_step]["valid"]
-                test_size = len(dataset_test)
-                loader_test = DataLoader(dataset_test, batch_size=test_size,
-                                shuffle=True, num_workers=8)
-            elif "allow_missing_blocks" not in vars(exp.flags):
-                loader_test = DataLoader(dataset_test, batch_size=n_samples,
-                                shuffle=True, num_workers=8)
-            else:
-                sampler_test = MissingModalitySampler(dataset_test, batch_size=n_samples,
-                                                    stratify=["age", "sex", "site"],
-                                                    discretize=["age"])
-                loader_test = DataLoader(dataset_test, batch_sampler=sampler_test, num_workers=8)
-            batch_idx = 0
-            data = {}
-            for idx, batch in enumerate(loader_test):
-                if args.test is None:
-                    local_metadata = batch[2]
-                    batch = batch[0]
-                # if "clinical" in batch.keys() and "rois" not in batch.keys() and batch_idx == 0:
-                if all([mod in batch.keys() for mod in modalities]) and batch_idx == 0:
-                    batch_idx += 1
-                    for k, m_key in enumerate(modalities):
-                        data[m_key] = Variable(batch[m_key]).to(exp.flags.device).float()
-                        test_size = len(data[m_key])
-                    metadata = local_metadata
+    correlations = np.zeros((len(latent_names), validation, len(clinical_names) + len(cov_names)))
+    kendalltaus = np.zeros((len(latent_names), validation, len(clinical_names) + len(cov_names)))
+    kendallpvalues = np.zeros((len(latent_names), validation, len(clinical_names) + len(cov_names)))
+    for val_step in range(validation):
+        if args.test is not None:
+            dataset_test = manager.train_dataset[val_step]["valid"]
+            test_size = len(dataset_test)
+            loader_test = DataLoader(dataset_test, batch_size=test_size,
+                            shuffle=True, num_workers=8)
+        elif "allow_missing_blocks" not in vars(exp.flags):
+            loader_test = DataLoader(dataset_test, batch_size=n_samples,
+                            shuffle=True, num_workers=8)
+        else:
+            sampler_test = MissingModalitySampler(dataset_test, batch_size=n_samples,
+                                                stratify=["age", "sex", "site"],
+                                                discretize=["age"])
+            loader_test = DataLoader(dataset_test, batch_sampler=sampler_test, num_workers=8)
+        batch_idx = 0
+        data = {}
+        for idx, batch in enumerate(loader_test):
+            if args.test is None:
+                local_metadata = batch[2]
+                batch = batch[0]
+            # if "clinical" in batch.keys() and "rois" not in batch.keys() and batch_idx == 0:
+            if all([mod in batch.keys() for mod in modalities]) and batch_idx == 0:
+                batch_idx += 1
+                for k, m_key in enumerate(modalities):
+                    data[m_key] = Variable(batch[m_key]).to(exp.flags.device).float()
+                    test_size = len(data[m_key])
+                metadata = local_metadata
+        idx_triu = np.triu(np.ones((test_size, test_size), dtype=bool), 1)
+        for latent_idx, latent_name in enumerate(latent_names):
             latents = exp.mm_vae(data, sample_latents=False)["latents"]
             if latent_name == "joint":
                 latents = latents["joint"][0]
             else:
                 latents = latents["modalities"][latent_name][0]
             n_scores = data["clinical"].shape[1]
-            n_subjects = len(latents)
-            latent_dissimilarity = np.zeros((n_subjects, n_subjects))
-            idx_triu = np.triu(np.ones((n_subjects, n_subjects), dtype=bool))
-            for i in range(n_subjects):
-                for j in range(n_subjects):
+            latent_dissimilarity = np.zeros((test_size, test_size))
+            for i in range(test_size):
+                for j in range(i, test_size):
                     latent_dissimilarity[i, j] = np.linalg.norm((latents[i] - latents[j]).cpu().detach().numpy())
-        
-            scores_dissimilarity = np.zeros((n_scores + len(cov_names), n_subjects, n_subjects))
+            scores_dissimilarity = np.zeros((n_scores + len(cov_names), test_size, test_size))
             for idx, score in enumerate(clinical_names.tolist() + cov_names):
-                for i in range(n_subjects):
-                    for j in range(n_subjects):
+                for i in range(test_size):
+                    for j in range(i, test_size):
                         if score in clinical_names:
-                            scores_dissimilarity[idx, i, j] = np.linalg.norm(data["clinical"][i, idx] - data["clinical"][j, idx])
+                            scores_dissimilarity[idx, i, j] = np.abs(data["clinical"][i, idx] - data["clinical"][j, idx])
                         elif score in ["sex", "site"]:
-                            scores_dissimilarity[idx, i, j] = 1 if metadata[score][i] == metadata[score][j] else 0
+                            scores_dissimilarity[idx, i, j] = 0 if metadata[score][i] == metadata[score][j] else 1
                         else:
-                            scores_dissimilarity[idx, i, j] = np.linalg.norm(metadata[score][i] - metadata[score][j])
+                            scores_dissimilarity[idx, i, j] = np.abs(metadata[score][i] - metadata[score][j])
                 r = np.corrcoef(np.concatenate([
                     scores_dissimilarity[idx][idx_triu].flatten()[np.newaxis,:],
                     latent_dissimilarity[idx_triu].flatten()[np.newaxis,:]]))[0, 1]
-                correlations[val_step, idx]= r
+                correlations[latent_idx, val_step, idx]= r
                 # order_scores = scores_dissimilarity[idx][idx_triu].argsort(axis=None)
                 # ranks_scores = np.empty_like(order_scores)
                 # ranks_scores[order_scores] = np.arange(len(order_scores))
@@ -545,21 +548,20 @@ if compute_similarity_matrices:
 
                 tau, pvalue = kendalltau(scores_dissimilarity[idx][idx_triu], latent_dissimilarity[idx_triu])
                 # tau, pvalue = kendalltau(ranks_scores, ranks_latent)
-                kendalltaus[val_step, idx] = tau
-                kendallpvalues[val_step, idx] = pvalue
+                kendalltaus[latent_idx, val_step, idx] = tau
+                kendallpvalues[latent_idx, val_step, idx] = pvalue
 
             # np.save(os.path.join(args.dir_experiment, args.run, "results", dir_name, "latent_dissimilarity.npy"), latent_dissimilarity)
             # np.save(os.path.join(args.dir_experiment, args.run, "results", dir_name, "scores_dissimilarity.npy"), scores_dissimilarity)
 
-        rsa_results = pd.DataFrame.from_dict(data={"correlation": correlations.mean(0),
-                                                   "correlation_std": correlations.std(0),
-                                                   "kendalltau": kendalltaus.mean(0),
-                                                   "kendalltau_std": kendalltaus.std(0),
-                                                   "kendalltau_pvalue": kendallpvalues.mean(0),
-                                                   "kendalltau_pvalue_std": kendallpvalues.std(0)},
+    for latent_idx, latent_name in enumerate(latent_names):
+        rsa_results = pd.DataFrame.from_dict(data={"correlation": correlations[latent_idx].mean(0),
+                                                    "correlation_std": correlations[latent_idx].std(0),
+                                                    "kendalltau": kendalltaus[latent_idx].mean(0),
+                                                    "kendalltau_std": kendalltaus[latent_idx].std(0),
+                                                    "kendalltau_pvalue": kendallpvalues[latent_idx].mean(0),
+                                                    "kendalltau_pvalue_std": kendallpvalues[latent_idx].std(0)},
                                             columns=clinical_names.tolist() + cov_names,
                                             orient="index")
                                     
-        rsa_results.to_csv(os.path.join(args.dir_experiment, args.run, "results", "rsa_results_{}_{}_validation.tsv".format(latent_name, validation)), sep="\t")
-        print(rsa_results)
-    
+        rsa_results.to_csv(os.path.join(args.dir_experiment, args.run, "results", "rsa_results_{}_{}_validation_{}_samples.tsv".format(latent_name, validation, n_samples)), sep="\t")    
