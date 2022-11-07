@@ -65,7 +65,7 @@ plot_meaningful_areas_per_score_per_metric = False
 # carefull, if True, opens as many fig tabs as number of clinical names * number of score + 3-4
 plot_latent_space = False
 plot_all_associations = False
-plot_radar = False
+plot_radar = True
 load_exp = False
 
 if plot_comparing_srs_hist:
@@ -156,7 +156,7 @@ if plot_comparing_srs_hist:
 ####### test other scores
 if plot_all_scores:
     clinical_names = np.load(os.path.join(args.datasetdir, "clinical_names.npy"), allow_pickle=True)
-    manager = DataManager(dataset=name_dataset_train, datasetdir=path,
+    manager = DataManager(dataset=name_dataset_train, datasetdir=args.datasetdir,
                         modalities=modalities, overwrite=True,
                         allow_missing_blocks=allow_missing_blocks[name_dataset_train],
                         **kwargs)
@@ -164,8 +164,7 @@ if plot_all_scores:
     if allow_missing_blocks[name_dataset_train]:
         sampler = MissingModalitySampler(manager["train"], batch_size=batch_size)
         loader = DataLoader(manager["train"], batch_sampler=sampler, num_workers=8)
-        sampler_test = MissingModalitySampler(manager["test"], batch_size=batch_size)
-        loader_test = DataLoader(manager["test"], batch_sampler=sampler_test, num_workers=8) 
+        loader_test = DataLoader(manager["test"], batch_size=batch_size, shuffle=True, num_workers=8) 
     else:
         loader = DataLoader(manager["train"], shuffle=True, batch_size=batch_size, num_workers=8)
         loader_test = DataLoader(manager["test"], shuffle=True, batch_size=batch_size, num_workers=8)
@@ -234,6 +233,8 @@ if plot_all_scores:
         plt.ylabel("Proportion of participants", size=13, family="serif")
         plt.legend(title="Diagnostic", fontsize=12, prop={"family": "serif"},
                     title_fontproperties={"family": "serif", "size": 13})
+    print("Correlation matrix between scores : ")
+    print(np.corrcoef(X, rowvar=False))
 
 
 
@@ -244,11 +245,11 @@ rois_names = np.load(os.path.join(args.datasetdir, "rois_names.npy"), allow_pick
 params = {}
 params["euaims"] = {
     "validation": 20, "n_discretization_steps": 200,
-    "n_samples": 47, "K": 1000, "trust_level": 1,
+    "n_samples": 49, "K": 1000, "trust_level": 1,
     "method": "hierarchical"}
 params["hbn"] = {
     "validation": 20, "n_discretization_steps": 200,
-    "n_samples": 150, "K": 1000, "trust_level": 0.95,
+    "n_samples": 150, "K": 1000, "trust_level": 0.7,
     "method": "hierarchical"}
 validation = params[name_dataset_train]["validation"]
 n_discretization_steps = params[name_dataset_train]["n_discretization_steps"]
@@ -361,37 +362,50 @@ textfont = textfont = dict(
             size=44,
             family="Droid Serif")
 inflated = True
-for n_most_connected in [3]:
-    color_palette = "Plotly"
+for n_most_connected in [5]:
+    color_name = "Plotly"
     if n_most_connected > 3:
-        color_palette = "Set3"
+        color_name = "Paired"
     if n_most_connected > 4:
-        color_palette = "Alphabet"
+        color_name = "tab20"
 
+    color_palette = getattr(px.colors.qualitative, color_name, None)
+    if color_palette is None:
+        mymap = plt.get_cmap(color_name)
+        if type(mymap) is mcolors.ListedColormap:
+            color_palette = mymap.colors
+        else:
+            color_palette = [mymap(idx / (n_most_connected * len(metrics))) for idx in range(n_most_connected * len(metrics))]
     all_areas_to_plot = []
     # n_areas_to_plot = 0
     color_per_area = []
+    show_most_connected = True
+    min_connections = 2
     for metric in metrics:#["thickness", "area"]:
-        targets, counts = np.unique(targets_per_metric[metric], return_counts=True)
-        # summed_values = [np.array(values_per_metric[metric])[np.array(targets_per_metric[metric]) == target].sum() for target in targets]
-        # counts_target = dict(zip(targets, zip(counts, summed_values)))
-        # counts_target = {k: v for k, v in sorted(counts_target.items(), key=lambda item: (item[1][0], item[1][1]), reverse=True)}
-        sorted_target = {t: v for t, v in sorted(zip(targets_per_metric[metric], pvalues_per_metric[metric]), key=lambda item: item[1])}
-        min_connections = 2
-        # thr_count_target = {key: value for key, value in list(counts_target.items())[:n_most_connected] if value[0] >= min_connections}
+        if show_most_connected:
+            targets, counts = np.unique(targets_per_metric[metric], return_counts=True)
+            summed_values = [np.array(values_per_metric[metric])[np.array(targets_per_metric[metric]) == target].sum() for target in targets]
+            counts_target = dict(zip(targets, zip(counts, summed_values)))
+            counts_target = {k: v for k, v in sorted(counts_target.items(), key=lambda item: (item[1][0], item[1][1]), reverse=True)}
+            min_connections = 2
+            thr_count_target = {key: value for key, value in list(counts_target.items())[:n_most_connected] if value[0] >= min_connections}
+        else:
+            sorted_target = {t: v for t, v in sorted(zip(targets_per_metric[metric], pvalues_per_metric[metric]), key=lambda item: item[1])}
+            thr_count_target = {key: value for key, value in list(sorted_target.items())[:n_most_connected]}
+
+        
         
         # Plot for this metric
-        thr_count_target = {key: value for key, value in list(sorted_target.items())[:10]}
-        areas_to_plot = [rois_names_no_metric_unique[idx - len(clinical_names)] for idx in thr_count_target]
+        # thr_count_target = {key: value for key, value in list(sorted_target.items())[:10]}
+        # areas_to_plot = [rois_names_no_metric_unique[idx - len(clinical_names)] for idx in thr_count_target]
         # plot_areas(areas_to_plot, np.arange(len(areas_to_plot)) + 0.01, "Plotly", inflated)
         # plt.title("most meaningfull area for {}".format(metric))
 
-        thr_count_target = {key: value for key, value in list(sorted_target.items())[:n_most_connected]}
         areas_to_plot = [rois_names_no_metric_unique[idx - len(clinical_names)] for idx in thr_count_target]
         all_areas_to_plot += [area for area in areas_to_plot if area not in all_areas_to_plot]
         # n_areas_to_plot += len(thr_count_target)
         # plot_areas(areas_to_plot, np.arange(len(thr_count_target)) + 0.01)
-        
+
         fig = go.Figure()
         all_values = []
         all_markers = []
@@ -421,7 +435,12 @@ for n_most_connected in [3]:
             if area_name not in color_per_area:
                 color_per_area.append(area_name)
             color_idx = color_per_area.index(area_name)
-            color = getattr(px.colors.qualitative, color_palette)[color_idx]
+            color = color_palette[color_idx]
+            color = tuple(int(c) if c > 1 and i <= 3 else int(c * 256) if i <= 3 else c for i, c in enumerate(color))
+            if len(color) < 4:
+                color = tuple((*color, 1))
+            if type(color) is tuple:
+                color = "rgba{}".format(str(color))
             all_values += new_values
             all_markers += markers
             fig.add_trace(go.Scatterpolar(
@@ -467,13 +486,14 @@ for n_most_connected in [3]:
                         ),
                     ),
                     font=textfont,
+                    showlegend=False
                 )
             if plot_radar:
                 fig.show()
         else:
             print("No meaningfully mostly connected rois for {}".format(metric))
     n_areas_to_plot = len(all_areas_to_plot)
-    plot_areas(all_areas_to_plot, np.arange(n_areas_to_plot) + 0.01, color_palette, inflated)
+    plot_areas(all_areas_to_plot, np.arange(n_areas_to_plot) + 0.01, color_name, inflated)
     plt.savefig(os.path.join(path_to_save_fig, "most_connected_areas"))
 
 plt.rcParams.update({'font.size': 20, "font.family": "serif"})
@@ -508,7 +528,7 @@ for score_idx, score in [(idx_of_srs, clinical_names[idx_of_srs])]:
         else:
             colors = [mymap(idx / len(areas)) for idx in range(len(areas))]
     mymap = mcolors.ListedColormap(colors)
-    ax.barh(areas, values, color=[mymap(idx / len(areas)) for idx in range(len(areas))])
+    ax.barh(areas, values, color=[mymap(idx / len(colors)) for idx in range(len(areas))])
     # plt.xticks(ticks=range(len(areas)), labels=areas, rotation=65)
     # ax.set_ytickslabels(areas)
     ax.tick_params(axis="y", which="both", length=0)

@@ -97,28 +97,31 @@ def fetch_multiblock_wrapper(datasetdir, defaults):
                 new_subj = np.load(block_paths[block]["subjects"], allow_pickle=True)
                 subj_per_block[block] = new_subj
             # Remove subjects that arent in all the channels
-            if not allow_missing_blocks:
-                common_subjects = list(
-                    set.intersection(*map(set, subj_per_block.values())))
-            else:
-                common_subjects = list(
-                    set.union(*map(set, subj_per_block.values())))
-                missing_modalities = [[] for _ in common_subjects]
+            common_subjects = sorted(list(
+                set.intersection(*map(set, subj_per_block.values()))))
+            if allow_missing_blocks:
+                all_subjects = set.union(*map(set, subj_per_block.values()))
+                other_subjects = sorted(list(all_subjects.difference(common_subjects)))
+                # missing_modalities = [[] for _ in other_subjects]
             index = {}
             for block in blocks:
                 subjects = subj_per_block[block].tolist()
                 new_index = []
-                for sub_idx, sub in enumerate(common_subjects):
-                    if sub in subjects:
-                        new_index.append(subjects.index(sub))
-                    else:
-                        new_index.append(None)
-                        missing_modalities[sub_idx].append(block)
+                for sub in common_subjects:
+                    new_index.append(subjects.index(sub))
+                if allow_missing_blocks:
+                    for sub in other_subjects:
+                        if sub in subjects:
+                            new_index.append(subjects.index(sub))
+                        else:
+                            new_index.append(None)
+                            # missing_modalities[sub_idx].append(block)
                 index[block] = np.array(new_index)
 
 
             metadata = pd.read_table(block_paths["metadata"])
-            metadata = extract_and_order_by(metadata, subject_column_name, common_subjects)
+            # all_metadata = extract_and_order_by(metadata, subject_column_name, all_subjects)
+            common_metadata = extract_and_order_by(metadata, subject_column_name, common_subjects)
             index_train_subjects = list(range(len(common_subjects)))
             if test_size is not None and test_size > 0:
                 splitter = ShuffleSplit(1, test_size=test_size,
@@ -129,14 +132,14 @@ def fetch_multiblock_wrapper(datasetdir, defaults):
                         1, test_size=test_size, random_state=seed)
                     if not type(stratify) is list:
                         stratify = [stratify]
-                    y = metadata[stratify].copy()
+                    y = common_metadata[stratify].copy()
                     for name in stratify:
                         if name in discretize:
                             y[name] = discretizer(y[name].values)
-                    if allow_missing_blocks:
-                        y["missing_modalities"] = [
-                            np.unique(missing_modalities).tolist().index(miss)
-                            for miss in missing_modalities]
+                    # if allow_missing_blocks:
+                        # y["missing_modalities"] = [
+                        #     np.unique(missing_modalities).tolist().index(miss)
+                        #     for miss in missing_modalities]
                 index_train_subjects, index_test_subjects = next(
                     splitter.split(common_subjects, y))
             elif test_size is None:
@@ -145,18 +148,21 @@ def fetch_multiblock_wrapper(datasetdir, defaults):
                     if sub in subjects_train]
                 index_test_subjects = [
                     idx for idx, sub in enumerate(common_subjects)
-                    if sub in subjects_test]
+                    if sub in subjects_test]                
 
             subjects_train = np.array(common_subjects)[index_train_subjects]
             if test_size is None or test_size > 0:
                 subjects_test = np.array(common_subjects)[index_test_subjects]
+            if allow_missing_blocks:
+                subjects_train = np.array(subjects_train.tolist() + other_subjects)
+                index_train_subjects = (list(index_train_subjects)
+                                        + list(range(len(common_subjects), len(all_subjects))))
             index_train = {}
             index_test = {}
             for block in blocks:
                 index_train[block] = index[block][index_train_subjects]
                 if test_size is None or test_size > 0:
                     index_test[block] = index[block][index_test_subjects]
-
             # Loading the metadata
             metadata_train = extract_and_order_by(metadata, subject_column_name, subjects_train)
             if test_size is None or test_size > 0:

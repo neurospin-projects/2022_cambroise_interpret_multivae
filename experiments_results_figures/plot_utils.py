@@ -189,7 +189,12 @@ def plot_areas(areas, colors, color_name="Plotly", inflated=False):
             color_palette = mymap.colors
         else:
             color_palette = [mymap(idx / len(areas)) for idx in range(len(areas))]
-    n_colors = len(areas)
+    n_colors = len(color_palette)
+    for color_idx, color in enumerate(color_palette):
+        if type(color) is str and "rgb" in color:
+            color_tuple = tuple(color.split("(")[1].split(")")[0].split(","))
+            new_color_tuple = tuple(float(color) if float(color) <= 1 else float(color) / 256 for color in color_tuple)
+            color_palette[color_idx] = new_color_tuple
     mymap = mcolors.ListedColormap(color_palette)
     # bounds = np.arange(len(px.colors.qualitative.Alphabet) + 1)
     # norm = mcolors.BoundaryNorm(bounds, mymap.N)

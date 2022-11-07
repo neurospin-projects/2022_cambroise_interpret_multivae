@@ -120,7 +120,7 @@ class MultimodalExperiment(BaseExperiment):
         mods_dict = {m.name: m for m in mods}
         return mods_dict
 
-    def set_scalers(self, dataset):
+    def set_scalers(self, dataset, residualizers=None):
         scalers = {}
         for mod in self.modalities:
             scaler = StandardScaler()
@@ -130,7 +130,7 @@ class MultimodalExperiment(BaseExperiment):
                 if mod in data[0].keys():
                     all_training_data.append(data[0][mod])
                     all_metadata.append(data[2])
-            if mod in self.residualizers:
+            if residualizers is not None and mod in residualizers:
                 print("resid before scaling")
                 all_training_data = np.asarray(all_training_data)
                 df = pd.DataFrame.from_records(all_metadata)
@@ -140,7 +140,7 @@ class MultimodalExperiment(BaseExperiment):
                 all_training_data = self.residualizers[mod].transform(df)[columns].values
             scaler.fit(all_training_data)
             scalers[mod] = scaler
-        self.scalers = scalers
+        return scalers
 
     def set_residualizers(self, dataset):
         if "residualize_by" not in vars(self):
@@ -166,34 +166,69 @@ class MultimodalExperiment(BaseExperiment):
                 residualizers[mod] = Residualizer(by_continuous=self.residualize_by[mod]["continuous"],
                                                   by_categorical=self.residualize_by[mod]["categorical"])
                 residualizers[mod].fit(df, columns)
-        self.residualizers = residualizers
+        return residualizers
 
     def unsqueeze_0(self, x):
         return x.unsqueeze(0)
 
     def set_dataset(self):
+        train = []
+        test = []
+        scalers = []
+        residualizers = []
+        validation = None
+        n_models = 1
+        test_size = 0.2
+        if "num_models" in vars(self.flags) and self.flags.num_models > 1:
+            validation = self.flags.num_models
+            test_size = 0
+            n_models = validation
+            
         manager = DataManager(self.flags.dataset, self.flags.datasetdir,
-                              list(self.modalities), overwrite=True,
-                              allow_missing_blocks=self.flags.allow_missing_blocks)
-        self.set_residualizers(manager.train_dataset)
-        self.set_scalers(manager.train_dataset)
-        self.transform = {mod: transforms.Compose([
-            self.unsqueeze_0,
-            scaler.transform,
-            transforms.ToTensor(),
-            torch.squeeze]) for mod, scaler in self.scalers.items()}
-        transform = {mod: residualizer.transform for mod, residualizer in self.residualizers.items()}
-        # transform = None
-        train = MultimodalDataset(manager.fetcher.train_input_path,
-                                  manager.fetcher.train_metadata_path,
-                                  on_the_fly_transform=self.transform,
-                                  transform=transform)
-        test = MultimodalDataset(manager.fetcher.test_input_path,
-                                 manager.fetcher.test_metadata_path,
-                                 on_the_fly_transform=self.transform,
-                                 transform=transform)
+                                list(self.modalities), overwrite=True,
+                                allow_missing_blocks=self.flags.allow_missing_blocks,
+                                validation=validation, test_size=test_size)
+        for model_idx in range(n_models):
+            train_dataset = manager.train_dataset
+            train_idx = None
+            test_input_path = manager.fetcher.test_input_path
+            test_metadata_path = manager.fetcher.test_metadata_path
+            test_idx = None
+            if validation is not None:
+                train_dataset = train_dataset[model_idx]["train"]
+                train_idx = train_dataset[model_idx]["train_idx"]
+                test_input_path = manager.fetcher.train_input_path
+                test_metadata_path = manager.fetcher.train_metadata_path
+                test_idx = train_dataset[model_idx]["test_idx"]
+            residualizer = self.set_residualizers(train_dataset)
+            residualizers.append(residualizer)
+            scalers.append(self.set_scalers(train_dataset, residualizer))
+            self.transform = {mod: transforms.Compose([
+                self.unsqueeze_0,
+                scaler.transform,
+                transforms.ToTensor(),
+                torch.squeeze]) for mod, scaler in scalers[model_idx].items()}
+            transform = {mod: residualizer.transform for mod, residualizer in residualizers[model_idx].items()}
+            # transform = None
+            train.append(MultimodalDataset(manager.fetcher.train_input_path,
+                                    manager.fetcher.train_metadata_path,
+                                    train_idx,
+                                    on_the_fly_transform=self.transform,
+                                    transform=transform))
+            test.append(MultimodalDataset(test_input_path, test_metadata_path,
+                                    test_idx,
+                                    on_the_fly_transform=self.transform,
+                                    transform=transform))
+        if n_models == 1:
+            train = train[0]
+            test = test[0]
+            residualizers = residualizers[0]
+            scalers = scalers[0]
         self.dataset_train = train
         self.dataset_test = test
+        self.residualizers = residualizers
+        self.scalers = scalers
+        print(self.dataset_test.metadata["participant_id"])
         print(len(train))
         print(len(test))
 

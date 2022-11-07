@@ -12,7 +12,7 @@ from argparse import ArgumentParser
 
 import statsmodels.api as sm
 from statsmodels.stats.anova import anova_lm
-from scipy.stats import kendalltau
+from scipy.stats import kendalltau, pearsonr
 
 from multimodal_cohort.dataset import DataManager, MissingModalitySampler
 from multimodal_cohort.experiment import MultimodalExperiment
@@ -50,6 +50,7 @@ def make_regression(df, x_name, y_name, other_cov_names=[], groups_name=None, me
     
 
 name_dataset_train = args.run.split("_")[0]
+modalities = ["clinical", "rois"]
 
 # with open(os.path.join(args.dir_experiment, args.run, "experiment.pickle"), "rb") as f:
 #     exp = pickle.load(f)
@@ -66,6 +67,8 @@ checkpoints_files = sorted(
     checkpoints_files, key=lambda path: int(path.split(os.sep)[-2]))
 checkpoint_file = checkpoints_files[-1]
 print(f"Restoring weights: {checkpoint_file}")
+all_particpants = []
+all_idx = []
 exp, flags = MultimodalExperiment.get_experiment(
     flags_file, alphabet_file, checkpoint_file)
 
@@ -77,7 +80,6 @@ if "allow_missing_blocks" in vars(exp.flags) and exp.flags.allow_missing_blocks:
     loader_train = DataLoader(exp.dataset_train, batch_sampler=sampler, num_workers=8)
 else:
     loader_train = DataLoader(exp.dataset_train, shuffle=True, batch_size=4096, num_workers=8)
-modalities = ["clinical", "rois"]
 
 dataset_test = exp.dataset_test
 if args.test is not None:
@@ -130,11 +132,11 @@ gradient_over_scores = True
 params = {}
 params["euaims"] = {
     "validation": 20, "n_discretization_steps": 200,
-    "n_samples": 47, "K": 1000, "trust_level": 1,
+    "n_samples": 49, "K": 1000, "trust_level": 1,
     "method": "hierarchical"}
 params["hbn"] = {
-    "validation": 1, "n_discretization_steps": 200,
-    "n_samples": 301, "K": 1000, "trust_level": 1,
+    "validation": 50, "n_discretization_steps": 200,
+    "n_samples": 150, "K": 1000, "trust_level": 1,
     "method": "hierarchical"}
 validation = params[name_dataset_train]["validation"]
 n_discretization_steps = params[name_dataset_train]["n_discretization_steps"]
@@ -203,14 +205,14 @@ if gradient_over_scores:
                 test_size = len(dataset_test)
                 loader_test = DataLoader(dataset_test, batch_size=test_size,
                                 shuffle=True, num_workers=8)
-            elif "allow_missing_blocks" not in vars(exp.flags):
+            else:# "allow_missing_blocks" not in vars(exp.flags):
                 loader_test = DataLoader(dataset_test, batch_size=n_samples,
                                 shuffle=True, num_workers=8)
-            else:
-                sampler_test = MissingModalitySampler(dataset_test, batch_size=n_samples,
-                                                      stratify=["age", "sex", "site"],
-                                                      discretize=["age"])
-                loader_test = DataLoader(dataset_test, batch_sampler=sampler_test, num_workers=8)
+            # else:
+            #     sampler_test = MissingModalitySampler(dataset_test, batch_size=n_samples,
+            #                                           stratify=["age", "sex", "site"],
+            #                                           discretize=["age"])
+            #     loader_test = DataLoader(dataset_test, batch_sampler=sampler_test, num_workers=8)
             batch_idx = 0
             data = {}
             for idx, batch in enumerate(loader_test):
@@ -320,7 +322,7 @@ if gradient_over_scores:
                     new_data = {
                         "clinical": clinical_copy,
                         "rois": data["rois"]}
-                    reconstructions = exp.mm_vae(new_data, sample_latents=False)["rec"]
+                    reconstructions = exp.mm_vae(new_data, sample_latents=True)["rec"]
                     new_rois_hat = reconstructions["rois"].loc
                     new_rois_hats[:, step, :, idx] = new_rois_hat.cpu().detach().numpy()
                     all_errors[:, idx, step] = (new_rois_hat - data["rois"]).cpu().detach().numpy()
@@ -473,32 +475,37 @@ if gradient_over_scores:
     #                 plt.title("Histogram of effects of {} on {}".format(score, metric))
     # plt.show()
 ##################### RSA
-compute_similarity_matrices = False
-validation = 20
+compute_similarity_matrices = True
+validation = 1
 n_samples = len(dataset_test)
-print(n_samples)
+sample_latents = False
 if compute_similarity_matrices:
     cov_names = ["age", "sex", "site"]
     if name_dataset_train == "euaims" or args.test == "euaims":
         cov_names.append("fsiq")
-    latent_names = ["joint", "clinical_style", "rois_style"]
+    latent_names = ["joint", "clinical_rois", "clinical_style", "rois_style"]
     correlations = np.zeros((len(latent_names), validation, len(clinical_names) + len(cov_names)))
+    correlationpvalues = np.zeros((len(latent_names), validation, len(clinical_names) + len(cov_names)))
     kendalltaus = np.zeros((len(latent_names), validation, len(clinical_names) + len(cov_names)))
     kendallpvalues = np.zeros((len(latent_names), validation, len(clinical_names) + len(cov_names)))
+    last_latents = np.zeros((len(latent_names), 0)).tolist()
     for val_step in range(validation):
         if args.test is not None:
             dataset_test = manager.train_dataset[val_step]["valid"]
             test_size = len(dataset_test)
             loader_test = DataLoader(dataset_test, batch_size=test_size,
                             shuffle=True, num_workers=8)
-        elif "allow_missing_blocks" not in vars(exp.flags):
+        # elif "allow_missing_blocks" not in vars(exp.flags):
+        #     loader_test = DataLoader(dataset_test, batch_size=n_samples,
+        #                     shuffle=True, num_workers=8)
+        # else:
+        #     sampler_test = MissingModalitySampler(dataset_test, batch_size=n_samples,
+        #                                           stratify=["age", "sex", "site"],
+        #                                           discretize=["age"])
+        #     loader_test = DataLoader(dataset_test, batch_sampler=sampler_test, num_workers=8)
+        else:
             loader_test = DataLoader(dataset_test, batch_size=n_samples,
                             shuffle=True, num_workers=8)
-        else:
-            sampler_test = MissingModalitySampler(dataset_test, batch_size=n_samples,
-                                                stratify=["age", "sex", "site"],
-                                                discretize=["age"])
-            loader_test = DataLoader(dataset_test, batch_sampler=sampler_test, num_workers=8)
         batch_idx = 0
         data = {}
         for idx, batch in enumerate(loader_test):
@@ -513,31 +520,42 @@ if compute_similarity_matrices:
                     test_size = len(data[m_key])
                 metadata = local_metadata
         idx_triu = np.triu(np.ones((test_size, test_size), dtype=bool), 1)
+
         for latent_idx, latent_name in enumerate(latent_names):
-            latents = exp.mm_vae(data, sample_latents=False)["latents"]
+            latents = exp.mm_vae(data, sample_latents=sample_latents)["latents"]
             if latent_name == "joint":
-                latents = latents["joint"][0]
+                latents = latents["joint"]
+            elif "style" in latent_name:
+                latents = latents["modalities"][latent_name]
             else:
-                latents = latents["modalities"][latent_name][0]
+                latents = latents["subsets"][latent_name]
+            if sample_latents:
+                latents = exp.mm_vae.reparameterize(latents[0], latents[1])
+            else:
+                latents = latents[0]
+            # print(latents.shape)
             n_scores = data["clinical"].shape[1]
             latent_dissimilarity = np.zeros((test_size, test_size))
             for i in range(test_size):
-                for j in range(i, test_size):
-                    latent_dissimilarity[i, j] = np.linalg.norm((latents[i] - latents[j]).cpu().detach().numpy())
+                for j in range(i + 1, test_size):
+                    latent_dissimilarity[i, j] = np.linalg.norm((latents[i].long() - latents[j].long()).cpu().detach().numpy())
+
             scores_dissimilarity = np.zeros((n_scores + len(cov_names), test_size, test_size))
             for idx, score in enumerate(clinical_names.tolist() + cov_names):
                 for i in range(test_size):
-                    for j in range(i, test_size):
+                    for j in range(i + 1, test_size):
                         if score in clinical_names:
                             scores_dissimilarity[idx, i, j] = np.abs(data["clinical"][i, idx] - data["clinical"][j, idx])
                         elif score in ["sex", "site"]:
                             scores_dissimilarity[idx, i, j] = 0 if metadata[score][i] == metadata[score][j] else 1
                         else:
                             scores_dissimilarity[idx, i, j] = np.abs(metadata[score][i] - metadata[score][j])
-                r = np.corrcoef(np.concatenate([
-                    scores_dissimilarity[idx][idx_triu].flatten()[np.newaxis,:],
-                    latent_dissimilarity[idx_triu].flatten()[np.newaxis,:]]))[0, 1]
-                correlations[latent_idx, val_step, idx]= r
+                # print(scores_dissimilarity[idx])
+
+                r_scipy = pearsonr(scores_dissimilarity[idx][idx_triu], latent_dissimilarity[idx_triu])
+                r, r_pvalue = r_scipy
+                correlations[latent_idx, val_step, idx] = r
+                correlationpvalues[latent_idx, val_step, idx] = r_pvalue
                 # order_scores = scores_dissimilarity[idx][idx_triu].argsort(axis=None)
                 # ranks_scores = np.empty_like(order_scores)
                 # ranks_scores[order_scores] = np.arange(len(order_scores))
@@ -553,10 +571,11 @@ if compute_similarity_matrices:
 
             # np.save(os.path.join(args.dir_experiment, args.run, "results", dir_name, "latent_dissimilarity.npy"), latent_dissimilarity)
             # np.save(os.path.join(args.dir_experiment, args.run, "results", dir_name, "scores_dissimilarity.npy"), scores_dissimilarity)
-
     for latent_idx, latent_name in enumerate(latent_names):
         rsa_results = pd.DataFrame.from_dict(data={"correlation": correlations[latent_idx].mean(0),
                                                     "correlation_std": correlations[latent_idx].std(0),
+                                                    "correlation_pvalue": correlationpvalues[latent_idx].mean(0),
+                                                    "correlation_pvalue_std": correlationpvalues[latent_idx].std(0),
                                                     "kendalltau": kendalltaus[latent_idx].mean(0),
                                                     "kendalltau_std": kendalltaus[latent_idx].std(0),
                                                     "kendalltau_pvalue": kendallpvalues[latent_idx].mean(0),
@@ -564,4 +583,4 @@ if compute_similarity_matrices:
                                             columns=clinical_names.tolist() + cov_names,
                                             orient="index")
                                     
-        rsa_results.to_csv(os.path.join(args.dir_experiment, args.run, "results", "rsa_results_{}_{}_validation_{}_samples.tsv".format(latent_name, validation, n_samples)), sep="\t")    
+        rsa_results.to_csv(os.path.join(args.dir_experiment, args.run, "results", "rsa_results_{}_{}_validation_{}_samples.tsv".format(latent_name, validation, test_size)), sep="\t")    

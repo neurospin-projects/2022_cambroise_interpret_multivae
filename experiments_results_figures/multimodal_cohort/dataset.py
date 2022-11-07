@@ -24,7 +24,6 @@ class MultimodalDataset(torch.utils.data.Dataset):
         self.modalities = list(self.idx_per_mod)
         self.metadata = (pd.read_table(metadata_path) if metadata_path
                          else None)
-       
         n_samples = [len(self.idx_per_mod[key]) for key in self.modalities]
         if not all([n_samples[i] == n_samples[(i+1) % len(n_samples)]
                     for i in range(len(n_samples))]):
@@ -228,9 +227,15 @@ class DataManager(object):
         if validation is not None:
             assert (type(validation) is int) and (validation > 0)
             idx_per_mod = np.load(idx_path, mmap_mode="r")
-
+            metadata = pd.read_table(metadata_path)
             modalities = list(idx_per_mod)
-            indices = list(range(len(idx_per_mod[modalities[0]])))
+            full_indices = []
+            not_full_indices = []
+            for idx in range(len(idx_per_mod[modalities[0]])):
+                if True in [indices[idx] is None for indices in idx_per_mod.values()]:
+                    not_full_indices.append(idx)
+                else:
+                    full_indices.append(idx)
             self.train_dataset = {}
             splitter = ShuffleSplit(
                 validation, test_size=val_size, random_state=seed)
@@ -239,12 +244,13 @@ class DataManager(object):
                 assert type(stratify) is list
                 splitter = MultilabelStratifiedShuffleSplit(
                     validation, test_size=val_size, random_state=seed)
-                y = pd.read_table(metadata_path)[stratify].copy()
+                y = metadata[stratify].iloc[full_indices].copy()
                 for name in stratify:
                     if name in discretize:
                         y[name] = discretizer(y[name].values)
-            splitted = splitter.split(indices, y)
+            splitted = splitter.split(full_indices, y)
             for fold, (train_idx, valid_idx) in enumerate(splitted):
+                train_idx = np.array(train_idx.tolist() + not_full_indices)
                 self.train_dataset[fold] = {}
                 self.train_dataset[fold]["train"] = MultimodalDataset(
                     idx_path, metadata_path,
@@ -254,6 +260,8 @@ class DataManager(object):
                     idx_path, metadata_path,
                     valid_idx, transform, on_the_fly_transform,
                     on_the_fly_inter_transform, overwrite)
+                self.train_dataset[fold]["train_idx"] = train_idx
+                self.train_dataset[fold]["valid_idx"] = valid_idx
             self.train_dataset["all"] = MultimodalDataset(
                 idx_path, metadata_path, None,
                 transform, on_the_fly_transform,

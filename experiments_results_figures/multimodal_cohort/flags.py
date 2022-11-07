@@ -1,6 +1,7 @@
 from utils.BaseFlags import parser as parser
 
-parser.add_argument('--dataset', type=str, default='euaims', help="name of the dataset")
+parser.add_argument('--dataset', type=str, default="euaims", help="name of the dataset")
+parser.add_argument('--num_models', type=int, default=1, help="number of models to be trained on various subsets of the data")
 
 parser.add_argument('--style_dim', nargs="+", type=int, default=[0, 0, 0], help="style dimension for each modality")
 parser.add_argument('--dropout_rate', "-dr", type=float, default=0, help="dropout rate")

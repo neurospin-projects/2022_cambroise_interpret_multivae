@@ -37,12 +37,14 @@ python main.py \
             --data_multiplications=1 \
             --num_hidden_layer_encoder=1 \
             --num_hidden_layer_decoder=0 \
-            --end_epoch=550 \
+            --end_epoch=1500 \
             -dr 0.0 \
             --initial_out_logvar=-3 \
             --learn_output_scale \
             --factorized_representation \
-            --allow_missing_blocks \
+            --num_models=1 \
+            # --allow_missing_blocks \
+            
             # --learn_output_sample_scale \
 
             # --dir_fid="$DIR_FID" \

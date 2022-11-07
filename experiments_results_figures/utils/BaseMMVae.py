@@ -137,8 +137,8 @@ class BaseMMVae(ABC, nn.Module):
         return True;
 
 
-    def forward(self, input_batch, sample_latents=True):
-        latents = self.inference(input_batch);
+    def forward(self, input_batch, sample_latents=True, use_expert=None):
+        latents = self.inference(input_batch, sample=sample_latents, use_expert=use_expert);
         results = dict();
         results['latents'] = latents;
         results['group_distr'] = latents['joint'];
@@ -181,7 +181,7 @@ class BaseMMVae(ABC, nn.Module):
         return latents;
 
 
-    def inference(self, input_batch, num_samples=None):
+    def inference(self, input_batch, num_samples=None, sample=True, use_expert=None):
         if num_samples is None:
             num_samples = len(list(input_batch.values())[0])
         latents = dict();
@@ -208,7 +208,7 @@ class BaseMMVae(ABC, nn.Module):
                         mods_avail = False;
                 if mods_avail:
                     weights_subset = ((1/float(len(mus_subset)))*
-                                      torch.ones(len(mus_subset)).to(self.flags.device));
+                                      torch.ones(len(mus_subset)).to(self.flags.device))
                     s_mu, s_logvar = self.modality_fusion(mus_subset,
                                                           logvars_subset,
                                                           weights_subset);
@@ -225,8 +225,13 @@ class BaseMMVae(ABC, nn.Module):
                                           self.flags.class_dim).to(self.flags.device)),
                                 dim=0);
         #weights = (1/float(len(mus)))*torch.ones(len(mus)).to(self.flags.device);
-        weights = (1/float(mus.shape[0]))*torch.ones(mus.shape[0]).to(self.flags.device);
-        joint_mu, joint_logvar = self.moe_fusion(mus, logvars, weights);
+        weights = (1/float(mus.shape[0]))*torch.ones(mus.shape[0]).to(self.flags.device)
+        if sample and use_expert is None:
+            joint_mu, joint_logvar = self.moe_fusion(mus, logvars, weights)
+        elif use_expert is None:
+            joint_mu, joint_logvar = mus.mean(0), logvars.mean(0)
+        else:
+            joint_mu, joint_logvar = distr_subsets[use_expert]
         #mus = torch.cat(mus, dim=0);
         #logvars = torch.cat(logvars, dim=0);
         latents['mus'] = mus;
