@@ -488,7 +488,6 @@ if compute_similarity_matrices:
     correlationpvalues = np.zeros((len(latent_names), validation, len(clinical_names) + len(cov_names)))
     kendalltaus = np.zeros((len(latent_names), validation, len(clinical_names) + len(cov_names)))
     kendallpvalues = np.zeros((len(latent_names), validation, len(clinical_names) + len(cov_names)))
-    last_latents = np.zeros((len(latent_names), 0)).tolist()
     for val_step in range(validation):
         if args.test is not None:
             dataset_test = manager.train_dataset[val_step]["valid"]
@@ -523,16 +522,7 @@ if compute_similarity_matrices:
 
         for latent_idx, latent_name in enumerate(latent_names):
             latents = exp.mm_vae(data, sample_latents=sample_latents)["latents"]
-            if latent_name == "joint":
-                latents = latents["joint"]
-            elif "style" in latent_name:
-                latents = latents["modalities"][latent_name]
-            else:
-                latents = latents["subsets"][latent_name]
-            if sample_latents:
-                latents = exp.mm_vae.reparameterize(latents[0], latents[1])
-            else:
-                latents = latents[0]
+            
             # print(latents.shape)
             n_scores = data["clinical"].shape[1]
             latent_dissimilarity = np.zeros((test_size, test_size))
