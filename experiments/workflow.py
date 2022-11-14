@@ -17,6 +17,7 @@ import glob
 import json
 import collections
 import numpy as np
+from numpy.lib.format import open_memmap
 import pandas as pd
 from tqdm import tqdm
 import statsmodels.api as sm
@@ -26,7 +27,6 @@ import torch
 from torch.distributions import Normal
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-from brainite.models import MCVAE
 from run_epochs import run_epochs
 from multimodal_cohort.flags import parser
 from utils.filehandling import create_dir_structure
@@ -272,7 +272,7 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
         for phase, loader in zip(("train", "test"), (trainloader, testloader)):
             dataiter = iter(loader)
             while True:
-                data, labels, _ = dataiter.next()
+                data, labels, _ = next(dataiter)
                 if all([mod in data.keys() for mod in modalities]):
                     break
             for idx, mod in enumerate(modalities):
@@ -310,6 +310,7 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
     da_file = os.path.join(resdir, "rois_digital_avatars.npy")
     sampled_scores_file = os.path.join(resdir, "sampled_scores.npy")
     metadata_file = os.path.join(resdir, "metadatas.npy")
+    metadata_cols_file = os.path.join(resdir, "metadatas_columns.npy")
     coefs_file = os.path.join(resdir, "coefs.npy")
     pvals_file = os.path.join(resdir, "pvalues.npy")
     if reg_method == "hierarchical":
@@ -329,7 +330,12 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
     traverses = torch.FloatTensor(np.linspace(
         min_per_score, max_per_score, params.n_discretization_steps))
     print_text(f"number of ROIs: {n_rois}")
-    rois_digital_avatars, sampled_scores, metadatas = [], [], []
+    sampled_scores, metadatas = [], []
+    rois_digital_avatars = open_memmap(
+        da_file, dtype='float32', mode='w+',
+        shape=(params.n_validation, params.n_samples,
+               n_scores, params.n_discretization_steps,
+               n_rois))
     if not os.path.isfile(pvals_file):
         for val_idx in tqdm(range(params.n_validation)):
             testloader = DataLoader(
@@ -338,7 +344,7 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
             data = {}
             dataiter = iter(testloader)
             while True:
-                data, _, metadata = dataiter.next()
+                data, _, metadata = next(dataiter)
                 if all([mod in data.keys() for mod in modalities]):
                     break
             for idx, mod in enumerate(modalities):
@@ -349,7 +355,8 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
                     metadata_df[column] = np.array(metadata[column])
                 else:
                     metadata_df[column] = metadata[column].cpu().detach().numpy()
-            metadatas.append(metadata_df)
+            metadata_columns = list(metadata.keys())
+            metadatas.append(metadata_df.to_numpy())
             test_size = len(data[mod])
             rois_avatars = np.zeros(
                 (test_size, n_scores, params.n_discretization_steps, n_rois))
@@ -390,18 +397,17 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
             else:
                 scores_values = np.swapaxes(
                     scores_values.detach().numpy(), 0, 1)
-            rois_digital_avatars.append(rois_avatars)
+            rois_digital_avatars[val_idx] = rois_avatars
             sampled_scores.append(scores_values)
-        rois_digital_avatars = np.asarray(rois_digital_avatars)
         sampled_scores = np.asarray(sampled_scores)
-        np.save(da_file, rois_digital_avatars)
+        del rois_digital_avatars
+        np.save(metadata_cols_file,metadata_columns)
         np.save(sampled_scores_file, sampled_scores)
         np.save(metadata_file, metadatas)
-    else:
-        rois_digital_avatars = np.load(da_file)
-        sampled_scores = np.load(sampled_scores_file)
-        metadatas = np.load(metadata_file, allow_pickle=True)
-
+    rois_digital_avatars = np.load(da_file, mmap_mode="r+")
+    sampled_scores = np.load(sampled_scores_file)
+    metadatas = np.load(metadata_file, allow_pickle=True)
+    metadata_columns =  np.load(metadata_cols_file, allow_pickle=True)
     print_text(f"digital avatars rois: {rois_digital_avatars.shape}")
     print_text(f"sampled scores: {sampled_scores.shape}")
     print_text(f"metadata: {len(metadatas), metadatas[0].shape}")
@@ -409,6 +415,8 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
     print_subtitle("Compute statistics (regression): digital avatar wrt "
                    "sampled scores...")
     if not os.path.isfile(pvals_file):
+        participant_id_idx = metadata_columns.tolist().index("participant_id")
+        site_idx = metadata_columns.tolist().index("site")
         coefs = np.zeros((params.n_validation, n_scores, n_rois))
         pvalues = np.zeros((params.n_validation, n_scores, n_rois))
         for val_idx in tqdm(range(params.n_validation)):
@@ -419,20 +427,28 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
                 all_coefs.append([])
             for score_idx in range(n_scores):
                 base_df = pd.DataFrame(dict(
-                    participant_id=np.repeat(metadata[["participant_id"]].to_numpy(), n_discretization_steps, axis=1).flatten(),
+                    participant_id=np.repeat(metadata[:, participant_id_idx, np.newaxis], n_discretization_steps, axis=1).flatten(),
                     sampled_score=scores_values[:, :, score_idx].flatten()))
                 if reg_method == "hierarchical":
-                    all_coefs[val_idx].append(metadata[["participant_id", "site"]].copy())
+                    all_coefs[val_idx].append(
+                        pd.DataFrame(metadata[:, [participant_id_idx, site_idx]],
+                                     columns=["participant_id", "site"]))
                 for roi_idx in range(n_rois):
                     df = base_df.copy()
-                    df["roi_avatar"] = rois_avatars[:, score_idx, :, roi_idx].flatten()
+                    df["roi_avatar"] = (
+                        rois_avatars[:, score_idx, :, roi_idx].flatten())
                     
-                    results = make_regression(df, "sampled_score", "roi_avatar", groups_name="participant_id", method=reg_method)
-                    pvalues[val_idx, score_idx, roi_idx], coefs[val_idx, score_idx, roi_idx], all_betas = results
+                    results = make_regression(df, "sampled_score", "roi_avatar",
+                                              groups_name="participant_id",
+                                              method=reg_method)
+                    new_pvals, new_coefs, all_betas = results
+                    pvalues[val_idx, score_idx, roi_idx] = new_pvals
+                    coefs[val_idx, score_idx, roi_idx] = new_coefs
                     if reg_method == "hierarchical":
                         roi_name = rois_names[roi_idx].replace("&", "_").replace("-", "_")
                         all_betas.rename(columns={"beta": roi_name}, inplace=True)
-                        all_coefs[val_idx][score_idx] = all_coefs[val_idx][score_idx].join(all_betas.set_index("participant_id"), on="participant_id")
+                        all_coefs[val_idx][score_idx] = all_coefs[val_idx][score_idx].join(
+                            all_betas.set_index("participant_id"), on="participant_id")
         np.save(pvals_file, pvalues)
         np.save(coefs_file, coefs)
         if reg_method == "hierarchical":
@@ -648,7 +664,7 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_samples=301,
         data = {}
         dataiter = iter(testloader)
         while True:
-            data, _, metadata = dataiter.next()
+            data, _, metadata = next(dataiter)
             if all([mod in data.keys() for mod in modalities]):
                 break
         for idx, mod in enumerate(modalities):
@@ -813,7 +829,8 @@ def rsa_plot_exp(dataset, datasetdir, outdir, run):
     plot_mosaic(images, cmat_file, n_cols=4, image_size=images.shape[-2:])
 
 
-def daa_plot_exp(dataset, datasetdir, outdir, run):
+def daa_plot_exp(dataset, datasetdir, outdir, run, plot_radar=True,
+                 plot_rois=True, plot_associations=False):
     """ Display specified score histogram across different cohorts.
     Parameters
     ----------
@@ -902,7 +919,7 @@ def daa_plot_exp(dataset, datasetdir, outdir, run):
                 font=dict(size=20, family="Droid Serif"))
             filename = os.path.join(
                 dirname, f"three_selected_rois_{_metric}_polarplots.png")
-            # fig.write_image(filename)
+            fig.write_image(filename)
             print_result(f"{_metric} regression coefficients for 3 selected "
                          f"ROIs: {filename}")
 
@@ -924,30 +941,34 @@ def daa_plot_exp(dataset, datasetdir, outdir, run):
         plot_surf_mosaic(data, titles, fsaverage, filename, label=True)
 
         print_subtitle(f"Plot significant scores/ROIs flows...")
-        for _metric, _df in df.groupby(["metric"]):
-            significant_scores = _df["score"].values
-            significant_rois = _df["roi"].values
-            significant_coefs = []
-            colors = []
-            for _roi, _score in zip(significant_rois, significant_scores):
-                score_idx = clinical_names.index(_score)
-                roi_idx = rois_names.index(f"{_roi}_{_metric}")
-                significant_coefs.append(coefs[:, score_idx, roi_idx].mean())
-            significant_coefs = np.asarray(significant_coefs)
-            colors = ["rgba(255,0,0,0.4)" if coef > 0 else "rgba(0,0,255,0.4)"
-                      for coef in significant_coefs]
-            sankey_plot = go.Parcats(
-                domain={"x": [0.05, 0.9], "y": [0, 1]},
-                dimensions=[{"label": "Score", "values": significant_scores},
-                            {"label": "ROI", "values": significant_rois}],
-                counts=np.abs(significant_coefs),
-                line={"color": colors, "shape": "hspline"},
-                labelfont=dict(family="Droid Serif", size=28),
-                tickfont=dict(family="Droid Serif", size=20))
-            fig = go.Figure(data=[sankey_plot])
-            filename = os.path.join(dirname, f"score2roi_{_metric}_flow.png")
-            # fig.write_image(filename)
-            print_result(f"flow for the {_metric} metric: {filename}")
+        if plot_associations:
+            for _metric, _df in df.groupby(["metric"]):
+                significant_scores = _df["score"].values
+                significant_rois = _df["roi"].values
+                significant_coefs = []
+                colors = []
+                for _roi, _score in zip(significant_rois, significant_scores):
+                    score_idx = clinical_names.index(_score)
+                    roi_idx = rois_names.index(f"{_roi}_{_metric}")
+                    significant_coefs.append(
+                        coefs[:, score_idx, roi_idx].mean())
+                significant_coefs = np.asarray(significant_coefs)
+                colors = ["rgba(255,0,0,0.4)" if coef > 0 else
+                          "rgba(0,0,255,0.4)" for coef in significant_coefs]
+                sankey_plot = go.Parcats(
+                    domain={"x": [0.05, 0.9], "y": [0, 1]},
+                    dimensions=[{"label": "Score",
+                                 "values": significant_scores},
+                                {"label": "ROI", "values": significant_rois}],
+                    counts=np.abs(significant_coefs),
+                    line={"color": colors, "shape": "hspline"},
+                    labelfont=dict(family="Droid Serif", size=28),
+                    tickfont=dict(family="Droid Serif", size=20))
+                fig = go.Figure(data=[sankey_plot])
+                filename = os.path.join(
+                    dirname, f"score2roi_{_metric}_flow.png")
+                fig.write_image(filename)
+                print_result(f"flow for the {_metric} metric: {filename}")
 
 
 def avatar_plot_exp(dataset, datasetdir, outdir, run):
