@@ -76,7 +76,6 @@ class MultimodalExperiment(BaseExperiment):
         # self.plot_img_size = torch.Size((3, 28, 28))
         # self.font = ImageFont.truetype('FreeSerif.ttf', 38)
         self.flags.num_features = len(alphabet)
-        print(self.num_modalities)
 
         self.modalities = self.set_modalities()
         self.subsets = self.set_subsets()
@@ -228,7 +227,6 @@ class MultimodalExperiment(BaseExperiment):
         self.dataset_test = test
         self.residualizers = residualizers
         self.scalers = scalers
-        print(self.dataset_test.metadata["participant_id"])
         print(len(train))
         print(len(test))
 
