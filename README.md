@@ -69,23 +69,23 @@ Perform the proposed Digital Avatars Aanalysis (DAA) on EUAIMS by running
 the following commands in a shell:
 
 ```
-cd mopoe
+cd experiments
 export DATASETDIR=/path/to/my/dataset
 export OUTDIR=/path/to/the/output/directory
 
-./mopoe train --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR
---latent_dim 20 --input_dims 7,444 --beta 5 --batch_size 256
---likelihood normal --initial_learning_rate 0.002 --n_epochs 50
+./experiments train --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR
+--latent_dim 20 --input_dims 7,444 --beta 1 --batch_size 256
+--likelihood normal --initial_learning_rate 0.002 --n_epochs 550
 --learn_output_scale --allow_missing_blocks
 
 export RUN=my_run_id
 
-./mopoe daa --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
-./mopoe rse --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
+./experiments daa --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
+./experiments rse --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
 
-./mopoe daa-plot --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
-./mopoe rsa-plot --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
-./mopoe hist-plot --datasets hbn,euaims --datasetdirs $DATASETDIR1,$DATASETDIR2
+./experiments daa-plot --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
+./experiments rsa-plot --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
+./experiments hist-plot --datasets hbn,euaims --datasetdirs $DATASETDIR1,$DATASETDIR2
 --scores SRS_Total,t1_srs_rawscore --outdir $OUTDIR
 ```
 
