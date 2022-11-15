@@ -358,7 +358,7 @@ plotting_clinical_names = {
     }
 }
 
-textfont = textfont = dict(
+textfont = dict(
             size=44,
             family="Droid Serif")
 inflated = True

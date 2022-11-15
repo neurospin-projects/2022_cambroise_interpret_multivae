@@ -18,11 +18,13 @@ import numpy as np
 from tqdm import tqdm
 import seaborn as sns
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from scipy.stats import ttest_1samp
 from scipy.stats import ttest_ind as ttest
 from utils import plot
-from color_utils import print_result
-import nilearn.plotting as plotting
+from color_utils import (print_result, plt_to_plotly_rgb, plotly_to_plt_rgb,
+                         get_color_list)
+from nilearn import plotting, datasets
 
 
 def plot_cmat(key, cmat, ax=None, figsize=None, dpi=None, fontsize=None,
@@ -150,7 +152,7 @@ def plot_bar(key, rsa, ax=None, figsize=None, dpi=None, fontsize=None,
         plt.title(title, fontsize=fontsize * 1.5, pad=2, fontweight=fontweight)
 
 
-def plot_surf_mosaic(data, titles, fsaverage, filename, label=True):
+def plot_surf_mosaic(data, titles, fsaverage, filename, label=True, color_name="Plotly"):
     n_plots = len(data)
     size = n_plots * 10 / 4.
     fig = plt.figure(figsize=(10, size))
@@ -166,6 +168,7 @@ def plot_surf_mosaic(data, titles, fsaverage, filename, label=True):
         for ax in axs:
             ax.axis("off")
         textures = data[idx]
+        colors = get_color_list(color_name)
         for hidx, hemi in enumerate(("left", "right")):
             if label:
                 plotting.plot_surf_roi(
@@ -191,6 +194,87 @@ def plot_surf_mosaic(data, titles, fsaverage, filename, label=True):
                         wspace=0.02, hspace=0.02)
     plt.savefig(filename)
     print_result(f"surface mosaic: {filename}")
+
+
+def nilearn_labels_to_feature_names(labels):
+    features = [label.decode().replace("_and_", "&")
+                for label in labels]
+    lh_features = ["{}_lh".format(item) for item in features]
+    rh_features = ["{}_rh".format(item) for item in features]
+    return lh_features, rh_features
+
+def plot_areas(areas, colors, filename=None, color_name="Plotly", inflated=True):
+    destrieux = datasets.fetch_atlas_surf_destrieux()    
+    fsaverage = datasets.fetch_surf_fsaverage()
+    lh_features, rh_features = nilearn_labels_to_feature_names(
+        destrieux["labels"])
+    print("-- features", len(lh_features), len(rh_features))
+    lh_map = np.zeros(destrieux["map_left"].shape)
+    rh_map = np.zeros(destrieux["map_right"].shape)
+
+    color_palette = get_color_list(color_name, len("areas"))
+    color_palette = [plotly_to_plt_rgb(color) for color in color_palette]
+    mymap = mcolors.ListedColormap(color_palette)
+    n_colors = len(color_palette)
+   
+    for idx, roi_name in enumerate(areas):
+        if "lh" in roi_name:
+            roi_index = lh_features.index(roi_name)
+            roi_surface_indices = (destrieux["map_left"] == roi_index)
+            lh_map[roi_surface_indices] = colors[idx]
+        else:
+            roi_index = rh_features.index(roi_name)
+            roi_surface_indices = (destrieux["map_right"] == roi_index)
+            rh_map[roi_surface_indices] = colors[idx]
+    fig, axs = plt.subplots(2, 2, subplot_kw={"projection": "3d"})
+    alpha = 1
+    bg_darkness = 0.4
+    template = "pial"
+    if inflated:
+        template = "infl"
+    plotting.plot_surf_roi(fsaverage['{}_left'.format(template)], roi_map=lh_map,
+                       hemi='left', view='lateral', cmap=mymap,
+                       bg_map=fsaverage['sulc_left'], bg_on_data=True,
+                       axes=axs[0, 0], alpha=alpha,
+                       vmin=0, vmax=n_colors,
+                       darkness=bg_darkness)
+    plotting.plot_surf_roi(fsaverage['{}_left'.format(template)], roi_map=lh_map,
+                       hemi='left', view='medial', cmap=mymap,
+                       bg_map=fsaverage['sulc_left'], bg_on_data=True,
+                       axes=axs[0, 1], alpha=alpha,
+                       vmin=0, vmax=n_colors,
+                       darkness=bg_darkness)
+    plotting.plot_surf_roi(fsaverage['{}_right'.format(template)], roi_map=rh_map,
+                       hemi='right', view='lateral', cmap=mymap,
+                       bg_map=fsaverage['sulc_right'], bg_on_data=True,
+                       axes=axs[1, 0], alpha=alpha,
+                       vmin=0, vmax=n_colors,
+                       darkness=bg_darkness)
+    plotting.plot_surf_roi(fsaverage['{}_right'.format(template)], roi_map=rh_map,
+                       hemi='right', view='medial', cmap=mymap,
+                       bg_map=fsaverage['sulc_right'], bg_on_data=True,
+                       axes=axs[1, 1], alpha=alpha,
+                       vmin=0, vmax=n_colors,
+                       darkness=bg_darkness)
+    if filename is not None:
+        fig.savefig(filename)
+    return fig
+
+def plot_coefs(bar_names, coefs, filename=None, color_name="Plotly"):
+    fig = plt.figure(figsize=(10, 7.5))
+    ax = fig.add_subplot(111)
+    colors = get_color_list(color_name, len(coefs))
+    mymap = mcolors.ListedColormap(colors)
+    ax.barh(bar_names, coefs, color=[mymap(idx / len(colors)) for idx in range(len(coefs))])
+    ax.tick_params(axis="y", which="both", length=0)
+    ticks = ax.get_xticks()
+    ticks = ticks[::2]
+    ax.set_xticks(ticks)
+    ax.tick_params(axis="x", which="both", labelsize=15)
+    plt.tight_layout()
+    if filename is not None:
+        fig.savefig(filename)
+    return fig
 
 
 def plot_mosaic(images, filename, n_cols=8, image_size=(28, 28), scaler=None):

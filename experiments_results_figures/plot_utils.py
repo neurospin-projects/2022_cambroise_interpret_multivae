@@ -241,7 +241,6 @@ def plot_areas(areas, colors, color_name="Plotly", inflated=False):
                        axes=axs[1, 1], alpha=alpha,
                        vmin=0, vmax=n_colors,
                        darkness=bg_darkness)
-    fontdict = {"fontfamily": "serif", "fontsize": 15}
     # axs[0, 0].set_title("Left hemisphere", fontdict=fontdict)
     # axs[0, 1].set_title("Right hemisphere", fontdict=fontdict)
     return fig

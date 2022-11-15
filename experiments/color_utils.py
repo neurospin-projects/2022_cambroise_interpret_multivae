@@ -14,6 +14,9 @@ Utility methods to print the results in a terminal using term colors.
 # Imports
 import os
 import platform
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import plotly.express as px
 
 
 IS_WINDOWS = platform.system() == "Windows"
@@ -24,6 +27,40 @@ IS_COLOR_TERM = "TERM" in os.environ and (
     )
 )
 
+def get_color_list(color_name, n_colors=None):
+    """ Gets a list of color from Plotly qualitative maps if it exist, or from
+    matplotlib color maps
+    """
+    color_palette = getattr(px.colors.qualitative, color_name, None)
+    if color_palette is None:
+        mymap = plt.get_cmap(color_name)
+        if type(mymap) is mcolors.ListedColormap:
+            color_palette = mymap.colors
+        elif n_colors is None:
+            raise ValueError("You want to use a continuous color map but did "
+                             "not provide a number of colors")
+        else:
+            color_palette = [mymap(idx / (n_colors)) for idx in range(n_colors)]
+    return color_palette
+
+def plt_to_plotly_rgb(color):
+    """ Converts a rgb color to plotly color format if necessary
+    """
+    color = tuple(int(c) if c > 1 and i <= 3 else int(c * 256) if i <= 3 else c for i, c in enumerate(color))
+    if len(color) < 4:
+        color = tuple((*color, 1))
+    if type(color) is tuple:
+        color = "rgba{}".format(str(color))
+    return color
+
+def plotly_to_plt_rgb(color):
+    """ Converts a rgb color to matplotlib color format if necessary
+    """
+    new_color_tuple = color
+    if type(color) is str and "rgb" in color:
+        color_tuple = tuple(color.split("(")[1].split(")")[0].split(","))
+        new_color_tuple = tuple(float(color) if float(color) <= 1 else float(color) / 256 for color in color_tuple)
+    return new_color_tuple
 
 # Dictionary of term colors used for printing to terminal
 fg_colors = {
