@@ -869,8 +869,20 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
     marker_signif = "star"
     marker_non_signif = "circle"
     for dirname in simdirs:
-        df = pd.read_csv(os.path.join(dirname, "significant_rois.tsv"),
-                         sep="\t")
+        n_validation = int(
+            dirname.split("n_validation_")[1].split("_n_samples")[0])
+        trust_level = n_validation * trust_level
+        idx_sign = ((pvalues < significativity_thr).sum(axis=0) >= trust_level)
+        data = {"metric": [], "roi": [], "score": []}
+        for idx, score in enumerate(clinical_names):
+            rois_idx = np.where(idx_sign[idx])
+            for name in rois_names[rois_idx]:
+                name, metric = name.rsplit("_", 1)
+                data["score"].append(score)
+                data["metric"].append(metric)
+                data["roi"].append(name)
+        df = pd.DataFrame.from_dict(data)
+
         coefs = np.load(os.path.join(dirname, "coefs.npy"))
         pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
 
@@ -1051,8 +1063,19 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
     significativity_thr = 0.05 / len(clinical_names) / len(rois_names)
 
     for dirname in simdirs:
-        df = pd.read_csv(os.path.join(dirname, "significant_rois.tsv"),
-                         sep="\t")
+        n_validation = int(
+            dirname.split("n_validation_")[1].split("_n_samples")[0])
+        trust_level = n_validation * trust_level
+        idx_sign = ((pvalues < significativity_thr).sum(axis=0) >= trust_level)
+        data = {"metric": [], "roi": [], "score": []}
+        for idx, score in enumerate(clinical_names):
+            rois_idx = np.where(idx_sign[idx])
+            for name in rois_names[rois_idx]:
+                name, metric = name.rsplit("_", 1)
+                data["score"].append(score)
+                data["metric"].append(metric)
+                data["roi"].append(name)
+        df = pd.DataFrame.from_dict(data)
         coefs = np.load(os.path.join(dirname, "coefs.npy"))
         pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
 
