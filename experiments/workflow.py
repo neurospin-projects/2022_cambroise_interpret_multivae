@@ -41,7 +41,7 @@ from color_utils import (
 def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
               latent_dim=20, style_dim=[3, 20],
               num_hidden_layer_encoder=1, num_hidden_layer_decoder=0,
-              allow_missing_blocks=False, factorized_representation=True, beta=1., 
+              allow_missing_blocks=True, factorized_representation=True, beta=1., 
               likelihood="normal", initial_learning_rate=0.002, batch_size=256,
               n_epochs=1500, eval_freq=25, eval_freq_fid=100,
               data_multiplications=1, dropout_rate=0., initial_out_logvar=-3.,
@@ -141,10 +141,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         flags.div_weight for _ in range(flags.num_mods)])
     create_dir_structure(flags)
 
-    alphabet_path = os.path.join(os.getcwd(), "alphabet.json")
-    with open(alphabet_path) as alphabet_file:
-        alphabet = str("".join(json.load(alphabet_file)))
-    mst = MultimodalExperiment(flags, alphabet)
+    mst = MultimodalExperiment(flags)
     mst.set_optimizer()
     run_epochs(mst)
 
@@ -224,7 +221,6 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
     flags_file = os.path.join(expdir, "flags.rar")
     if not os.path.isfile(flags_file):
         raise ValueError("You need first to train the model.")
-    alphabet_file = os.path.join(os.getcwd(), "alphabet.json")
     checkpoints_files = glob.glob(
         os.path.join(expdir, "checkpoints", "*", "mm_vae"))
     if len(checkpoints_files) == 0:
@@ -234,7 +230,7 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
     checkpoint_file = checkpoints_files[-1]
     print_text(f"restoring weights: {checkpoint_file}")
     experiment, flags = MultimodalExperiment.get_experiment(
-        flags_file, alphabet_file, checkpoint_file)
+        flags_file, checkpoint_file)
     model = experiment.mm_vae
     print(model)
     clinical_names = np.load(
@@ -846,6 +842,7 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
         `<dataset>_<timestamp>'.
     """
     from plotting import plot_surf_mosaic, plot_areas
+    from multimodal_cohort.constants import short_clinical_names
     import plotly.graph_objects as go
     import matplotlib.pyplot as plt
     from nilearn import datasets
@@ -912,7 +909,7 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
                     go.Scatterpolar(
                         r=_scores + _scores[:1],
                         theta=[
-                            "<b>" + name + "</b>"
+                            "<b>" + short_clinical_names[dataset][name] + "</b>"
                             for name in clinical_names + clinical_names[:1]],
                         mode="lines+text",
                         marker_color=color,
@@ -923,7 +920,9 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
                                 family=textfont["family"]),
                             text="<b>ROIs</b>"),
                         name=_roi))
-            for marker, name, sign in [(marker_non_signif, "non significative", False), (marker_signif, "significative", True)]:
+            for marker, name, sign in [
+                (marker_non_signif, "non significative", False),
+                (marker_signif, "significative", True)]:
                 significative_scores = []
                 score_names = []
                 markers = []
@@ -935,7 +934,8 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
                             markers.append(marker)
                 fig.add_trace(go.Scatterpolar(
                     r=np.array(significative_scores),
-                    theta=np.array(["<b>" + name + "</b>" for name in score_names]),
+                    theta=np.array(["<b>" + short_clinical_names[dataset][name]
+                                    + "</b>" for name in score_names]),
                     # fill='toself',
                     mode="markers",
                     legendgroup="significativity",

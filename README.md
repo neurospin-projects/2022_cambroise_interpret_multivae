@@ -20,8 +20,8 @@ If you have any question about the code or the paper, we are happy to help!
 ## Preliminaries
 
 This code was developed and tested with:
-- Python version 3.5.6
-- PyTorch version 1.4.0
+- Python version 3.9.13
+- PyTorch version 1.13.0
 - CUDA version 11.0
 - The conda environment defined in `environment.yml`
 

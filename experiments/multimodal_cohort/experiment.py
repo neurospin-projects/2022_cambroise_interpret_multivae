@@ -16,7 +16,7 @@ from modalities.multimodal_cohort import Clinical, Rois
 
 from multimodal_cohort.dataset import MultimodalDataset, DataManager
 
-
+from multimodal_cohort.constants import short_clinical_names
 from multimodal_cohort.networks.VAE import VAE
 from multimodal_cohort.networks.networks import Encoder, Decoder
 
@@ -61,27 +61,20 @@ class Residualizer:
 
 
 class MultimodalExperiment(BaseExperiment):
-    def __init__(self, flags, alphabet):
+    def __init__(self, flags):
         super().__init__(flags)
-        # self.flags = flags
-        # self.name = flags.name
-        # self.dataset_name = flags.dataset
         self.num_modalities = flags.num_mods
-        self.alphabet = alphabet
         self.residualize_by = dict()
         # self.residualize_by["rois"] = dict(
         #     continuous=["age"],
         #     categorical=["sex", "site"]
         # )
-        # self.plot_img_size = torch.Size((3, 28, 28))
-        # self.font = ImageFont.truetype('FreeSerif.ttf', 38)
-        self.flags.num_features = len(alphabet)
-
         self.modalities = self.set_modalities()
         self.subsets = self.set_subsets()
         self.dataset_train = None
         self.dataset_test = None
         self.set_dataset()
+        self.short_clinical_names = short_clinical_names[self.flags.dataset]
 
         self.mm_vae = self.set_model()
         self.optimizer = None
@@ -93,11 +86,9 @@ class MultimodalExperiment(BaseExperiment):
         self.labels = ['ASD']
     
     @classmethod
-    def get_experiment(cls, flags_file, alphabet_file, checkpoint_file):
+    def get_experiment(cls, flags_file, checkpoint_file):
         flags = torch.load(flags_file)
-        with open(alphabet_file, "rt") as of:
-            alphabet = str("".join(json.load(of)))
-        experiment = MultimodalExperiment(flags, alphabet)
+        experiment = MultimodalExperiment(flags)
         checkpoint = torch.load(checkpoint_file)
         experiment.mm_vae.load_state_dict(checkpoint)
         return experiment, flags
@@ -156,8 +147,6 @@ class MultimodalExperiment(BaseExperiment):
                         all_training_data.append(data[0][mod])
                         all_metadata.append(data[2])
                 all_training_data = np.asarray(all_training_data)
-                # if mod in self.scalers.keys():
-                #     all_training_data = self.scalers[mod].transform(all_training_data)
                 df = pd.DataFrame.from_records(all_metadata)
                 columns = np.load(os.path.join(self.flags.datasetdir, self.modalities[mod].names_file), allow_pickle=True)
                 columns = [col.replace("&", "_").replace("-", "_") for col in columns]
