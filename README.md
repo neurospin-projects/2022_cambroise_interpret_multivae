@@ -65,7 +65,7 @@ change the script's `--method` variabe to `poe`, `moe`, or `joint_elbo`
 respectively. By default, `joint_elbo` is selected.
 
 
-Perform the proposed Digital Avatars Aanalysis (DAA) on EUAIMS by running
+Perform the proposed Digital Avatars Aanalysis (DAA) on HBN by running
 the following commands in a shell:
 
 ```
@@ -73,18 +73,20 @@ cd experiments
 export DATASETDIR=/path/to/my/dataset
 export OUTDIR=/path/to/the/output/directory
 
-./experiments train --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR
+./experiments train --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR
 --latent_dim 20 --input_dims 7,444 --beta 1 --batch_size 256
 --likelihood normal --initial_learning_rate 0.002 --n_epochs 550
 --learn_output_scale --allow_missing_blocks
 
 export RUN=my_run_id
 
-./experiments daa --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
-./experiments rse --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
+# /!\ Long run /!\
+./experiments daa --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN --n_samples 150 --n_validation 20 --trust_level 0.7
+./experiments rse --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
 
-./experiments daa-plot --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
-./experiments rsa-plot --dataset euaims --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
+./experiments daa-plot-most-connected --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
+./experiments daa-plot-score-metric --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN --score SRS_Total --metric thickness
+./experiments rsa-plot --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
 ./experiments hist-plot --datasets hbn,euaims --datasetdirs $DATASETDIR1,$DATASETDIR2
 --scores SRS_Total,t1_srs_rawscore --outdir $OUTDIR
 ```
