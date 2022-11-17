@@ -133,13 +133,22 @@ def basic_routine_epoch(exp, batch):
     return out_basic_routine
 
 
-def train(epoch, exp, tb_logger):
-    mm_vae = exp.mm_vae
-    mm_vae.train()
-    exp.mm_vae = mm_vae
+def train(model_idx, epoch, exp, tb_logger):
+    model = exp.models
+    dataset = exp.dataset_train
+    optimizer = exp.optimizers
+    if exp.flags.n_models > 1:
+        model = model[model_idx]
+        model.train()
+        exp.models[model_idx] = model
+        dataset = dataset[model_idx]
+        optimizer = optimizer[model_idx]
+    else:
+        model.train()
+        exp.models = model
 
-    sampler = MissingModalitySampler(exp.dataset_train, batch_size=exp.flags.batch_size)
-    d_loader = DataLoader(exp.dataset_train, batch_sampler=sampler, num_workers=8)
+    sampler = MissingModalitySampler(dataset, batch_size=exp.flags.batch_size)
+    d_loader = DataLoader(dataset, batch_sampler=sampler, num_workers=8)
 
     for iteration, batch in enumerate(d_loader):
         basic_routine = basic_routine_epoch(exp, batch)
@@ -148,20 +157,27 @@ def train(epoch, exp, tb_logger):
         klds = basic_routine["klds"]
         log_probs = basic_routine["log_probs"]
         # backprop
-        exp.optimizer.zero_grad()
+        optimizer.zero_grad()
         total_loss.backward()
-        exp.optimizer.step()
+        optimizer.step()
         tb_logger.write_training_logs(results, total_loss, log_probs, klds)
 
 
-def test(epoch, exp, tb_logger):
+def test(model_idx, epoch, exp, tb_logger):
     with torch.no_grad():
-        mm_vae = exp.mm_vae
-        mm_vae.eval()
-        exp.mm_vae = mm_vae
+        model = exp.models
+        dataset = exp.dataset_test
+        if exp.flags.n_models > 1:
+            model = model[model_idx]
+            model.eval()
+            exp.models[model_idx] = model
+            dataset = dataset[model_idx]
+        else:
+            model.eval()
+            exp.models = model
 
-        sampler = MissingModalitySampler(exp.dataset_test, batch_size=exp.flags.batch_size)
-        d_loader = DataLoader(exp.dataset_test, batch_sampler=sampler, num_workers=8)
+        sampler = MissingModalitySampler(dataset, batch_size=exp.flags.batch_size)
+        d_loader = DataLoader(dataset, batch_sampler=sampler, num_workers=8)
 
         for _, batch in enumerate(d_loader):
             basic_routine = basic_routine_epoch(exp, batch)
@@ -184,22 +200,36 @@ def test(epoch, exp, tb_logger):
 
 def run_epochs(exp):
     # initialize summary writer
-    writer = SummaryWriter(exp.flags.dir_logs)
-    tb_logger = TBLogger(exp.flags.str_experiment, writer)
+    
     str_flags = utils.save_and_log_flags(exp.flags)
-    tb_logger.writer.add_text("FLAGS", str_flags, 0)
 
     print("training epochs progress:")
-    for epoch in range(exp.flags.start_epoch, exp.flags.end_epoch):
-        utils.printProgressBar(epoch, exp.flags.end_epoch)
-        # one epoch of training and testing
-        train(epoch, exp, tb_logger)
-        test(epoch, exp, tb_logger)
-        # save checkpoints after every 5 epochs
-        if (epoch + 1) % 5 == 0 or (epoch + 1) == exp.flags.end_epoch:
-            dir_network_epoch = os.path.join(exp.flags.dir_checkpoints, str(epoch).zfill(4))
-            if not os.path.exists(dir_network_epoch):
-                os.makedirs(dir_network_epoch)
-            exp.mm_vae.save_networks()
-            torch.save(exp.mm_vae.state_dict(),
-                       os.path.join(dir_network_epoch, exp.flags.mm_vae_save))
+    for model_idx in range(exp.flags.n_models):
+        log_path = exp.flags.str_experiment
+        dir_logs = exp.flags.dir_logs
+        if exp.flags.n_models > 1:
+            log_path = os.path.join(log_path, f"model_{model_idx}")
+            dir_logs = dir_logs[model_idx]
+        writer = SummaryWriter(dir_logs)
+        tb_logger = TBLogger(log_path, writer)
+        tb_logger.writer.add_text("FLAGS", str_flags, 0)
+        for epoch in range(exp.flags.start_epoch, exp.flags.end_epoch):
+            utils.printProgressBar(epoch, exp.flags.end_epoch)
+            # one epoch of training and testing
+            train(model_idx, epoch, exp, tb_logger)
+            test(model_idx, epoch, exp, tb_logger)
+            # save checkpoints after every 5 epochs
+            if (epoch + 1) % 5 == 0 or (epoch + 1) == exp.flags.end_epoch:
+                dir_network_epoch = os.path.join(exp.flags.dir_checkpoints,
+                                                 str(epoch).zfill(4))
+                model = exp.models
+                if exp.flags.n_models > 1:
+                    dir_network_epoch = os.path.join(exp.flags.dir_checkpoints,
+                                                     f"model_{model_idx}",
+                                                     str(epoch).zfill(4))
+                    model = model[model_idx]
+                if not os.path.exists(dir_network_epoch):
+                    os.makedirs(dir_network_epoch)
+                model.save_networks()
+                torch.save(model.state_dict(),
+                    os.path.join(dir_network_epoch, exp.flags.model_save))

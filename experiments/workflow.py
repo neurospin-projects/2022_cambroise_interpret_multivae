@@ -142,7 +142,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
     create_dir_structure(flags)
 
     mst = MultimodalExperiment(flags)
-    mst.set_optimizer()
+    mst.set_optimizers()
     run_epochs(mst)
 
     if os.path.exists(os.path.join(flags.dir_experiment, "runs.tsv")):
@@ -869,6 +869,8 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
     marker_signif = "star"
     marker_non_signif = "circle"
     for dirname in simdirs:
+        coefs = np.load(os.path.join(dirname, "coefs.npy"))
+        pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
         n_validation = int(
             dirname.split("n_validation_")[1].split("_n_samples")[0])
         trust_level = n_validation * trust_level
@@ -876,15 +878,12 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
         data = {"metric": [], "roi": [], "score": []}
         for idx, score in enumerate(clinical_names):
             rois_idx = np.where(idx_sign[idx])
-            for name in rois_names[rois_idx]:
+            for name in np.array(rois_names)[rois_idx]:
                 name, metric = name.rsplit("_", 1)
                 data["score"].append(score)
                 data["metric"].append(metric)
                 data["roi"].append(name)
         df = pd.DataFrame.from_dict(data)
-
-        coefs = np.load(os.path.join(dirname, "coefs.npy"))
-        pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
 
         print_subtitle(f"Plot regression coefficients radar plots...")
         counts = collections.Counter(df["roi"].values)
@@ -1063,21 +1062,21 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
     significativity_thr = 0.05 / len(clinical_names) / len(rois_names)
 
     for dirname in simdirs:
+        coefs = np.load(os.path.join(dirname, "coefs.npy"))
+        pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
         n_validation = int(
             dirname.split("n_validation_")[1].split("_n_samples")[0])
         trust_level = n_validation * trust_level
         idx_sign = ((pvalues < significativity_thr).sum(axis=0) >= trust_level)
         data = {"metric": [], "roi": [], "score": []}
-        for idx, score in enumerate(clinical_names):
+        for idx, _score in enumerate(clinical_names):
             rois_idx = np.where(idx_sign[idx])
-            for name in rois_names[rois_idx]:
-                name, metric = name.rsplit("_", 1)
-                data["score"].append(score)
-                data["metric"].append(metric)
-                data["roi"].append(name)
+            for name in np.array(rois_names)[rois_idx]:
+                _name, _metric = name.rsplit("_", 1)
+                data["score"].append(_score)
+                data["metric"].append(_metric)
+                data["roi"].append(_name)
         df = pd.DataFrame.from_dict(data)
-        coefs = np.load(os.path.join(dirname, "coefs.npy"))
-        pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
 
         areas = df["roi"][(df["metric"] == metric) & (df["score"] == score)].to_list()
         area_idx = [rois_names.index(f"{name}_{metric}") for name in areas]

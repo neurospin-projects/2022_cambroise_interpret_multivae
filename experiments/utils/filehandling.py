@@ -13,7 +13,7 @@ def create_dir(dir_name):
 def get_str_experiments(flags):
     dateTimeObj = datetime.now()
     dateStr = dateTimeObj.strftime("%Y_%m_%d_%H_%M")
-    str_experiments = flags.dataset + '_' + dateStr;
+    str_experiments = flags.dataset + '_' + dateStr
     return str_experiments
 
 
@@ -30,7 +30,7 @@ def create_dir_structure(flags, train=True):
     if train:
         str_experiments = get_str_experiments(flags)
         flags.dir_experiment_run = os.path.join(flags.dir_experiment, str_experiments)
-        flags.str_experiment = str_experiments;
+        flags.str_experiment = str_experiments
     else:
         flags.dir_experiment_run = flags.dir_experiment;
 
@@ -43,6 +43,12 @@ def create_dir_structure(flags, train=True):
         create_dir(flags.dir_checkpoints)
 
     flags.dir_logs = os.path.join(flags.dir_experiment_run, 'logs')
+    if flags.n_models > 1:
+        dir_logs = []
+        for model_idx in range(flags.n_models):
+            dir = os.path.join(flags.dir_logs, f"model_{model_idx}")
+            dir_logs.append(dir)
+        flags.dir_logs = dir_logs
     if train:
         create_dir(flags.dir_logs)
     print(flags.dir_logs)

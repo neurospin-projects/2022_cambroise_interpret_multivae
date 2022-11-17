@@ -16,7 +16,7 @@ parser.add_argument('--end_epoch', type=int, default=100, help="flag to indicate
 parser.add_argument('--class_dim', type=int, default=20, help="dimension of common factor latent space")
 
 # SAVE and LOAD
-parser.add_argument('--mm_vae_save', type=str, default='mm_vae', help="model save for vae_bimodal")
+parser.add_argument('--model_save', type=str, default='model', help="model save")
 parser.add_argument('--load_saved', type=bool, default=False, help="flag to indicate if a saved model will be loaded")
 
 # DIRECTORIES

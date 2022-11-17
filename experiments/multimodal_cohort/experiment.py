@@ -76,8 +76,8 @@ class MultimodalExperiment(BaseExperiment):
         self.set_dataset()
         self.short_clinical_names = short_clinical_names[self.flags.dataset]
 
-        self.mm_vae = self.set_model()
-        self.optimizer = None
+        self.models = self.set_models()
+        self.optimizers = None
         self.rec_weights = self.set_rec_weights()
         self.style_weights = self.set_style_weights()
         self.test_samples = self.get_test_samples()
@@ -93,10 +93,14 @@ class MultimodalExperiment(BaseExperiment):
         experiment.mm_vae.load_state_dict(checkpoint)
         return experiment, flags
 
-    def set_model(self):
-        model = VAE(self.flags, self.modalities, self.subsets)
-        model = model.to(self.flags.device)
-        return model
+    def set_models(self):
+        models = []
+        for _ in range(self.flags.n_models):
+            model = VAE(self.flags, self.modalities, self.subsets)
+            models.append(model.to(self.flags.device))
+        if self.flags.n_models == 1:
+            models = models[0]
+        return models
 
     def set_modalities(self):
         if type(self.flags.style_dim) is int:
@@ -219,16 +223,21 @@ class MultimodalExperiment(BaseExperiment):
         print(len(train))
         print(len(test))
 
-    def set_optimizer(self):
+    def set_optimizers(self):
         # optimizer definition
         total_params = sum(p.numel() for p in self.mm_vae.parameters())
         params = list(self.mm_vae.parameters());
         print('num parameters: ' + str(total_params))
-        optimizer = optim.Adam(params,
-                               lr=self.flags.initial_learning_rate,
-                               betas=(self.flags.beta_1,
-                               self.flags.beta_2))
-        self.optimizer = optimizer
+        optimizers = []
+        for _ in range(self.flags.n_models):
+            optimizer = optim.Adam(params,
+                                lr=self.flags.initial_learning_rate,
+                                betas=(self.flags.beta_1,
+                                self.flags.beta_2))
+            optimizers.append(optimizer)
+        if self.flags.n_models == 1:
+            optimizers = optimizers[0]
+        self.optimizers = optimizers
 
     def set_rec_weights(self):
         rec_weights = dict()

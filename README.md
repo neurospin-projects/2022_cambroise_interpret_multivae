@@ -87,8 +87,7 @@ export RUN=my_run_id
 ./experiments daa-plot-most-connected --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
 ./experiments daa-plot-score-metric --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN --score SRS_Total --metric thickness
 ./experiments rsa-plot --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
-./experiments hist-plot --datasets hbn,euaims --datasetdirs $DATASETDIR1,$DATASETDIR2
---scores SRS_Total,t1_srs_rawscore --outdir $OUTDIR
+./experiments hist-plot --datasets hbn,euaims --datasetdirs $DATASETDIR1,$DATASETDIR2 --scores SRS_Total,t1_srs_rawscore --outdir $OUTDIR
 ```
 
 Citation

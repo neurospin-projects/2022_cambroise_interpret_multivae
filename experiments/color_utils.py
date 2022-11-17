@@ -29,7 +29,8 @@ IS_COLOR_TERM = "TERM" in os.environ and (
 
 def get_color_list(color_name, n_colors=None):
     """ Gets a list of color from Plotly qualitative maps if it exist, or from
-    matplotlib color maps
+    matplotlib color maps. If it does not correspond to a discrete map, you
+    are required to provide a number of colors
     """
     color_palette = getattr(px.colors.qualitative, color_name, None)
     if color_palette is None:
