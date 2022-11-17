@@ -73,14 +73,14 @@ class MultimodalExperiment(BaseExperiment):
         self.subsets = self.set_subsets()
         self.dataset_train = None
         self.dataset_test = None
-        self.set_dataset()
+        self.set_datasets()
         self.short_clinical_names = short_clinical_names[self.flags.dataset]
 
         self.models = self.set_models()
         self.optimizers = None
         self.rec_weights = self.set_rec_weights()
         self.style_weights = self.set_style_weights()
-        self.test_samples = self.get_test_samples()
+        # self.test_samples = self.get_test_samples()
         self.eval_metric = accuracy_score
         self.paths_fid = self.set_paths_fid()
         self.labels = ['ASD']
@@ -95,10 +95,10 @@ class MultimodalExperiment(BaseExperiment):
 
     def set_models(self):
         models = []
-        for _ in range(self.flags.n_models):
+        for _ in range(self.flags.num_models):
             model = VAE(self.flags, self.modalities, self.subsets)
             models.append(model.to(self.flags.device))
-        if self.flags.n_models == 1:
+        if self.flags.num_models == 1:
             models = models[0]
         return models
 
@@ -163,7 +163,7 @@ class MultimodalExperiment(BaseExperiment):
     def unsqueeze_0(self, x):
         return x.unsqueeze(0)
 
-    def set_dataset(self):
+    def set_datasets(self):
         train = []
         test = []
         scalers = []
@@ -187,11 +187,11 @@ class MultimodalExperiment(BaseExperiment):
             test_metadata_path = manager.fetcher.test_metadata_path
             test_idx = None
             if validation is not None:
-                train_dataset = train_dataset[model_idx]["train"]
                 train_idx = train_dataset[model_idx]["train_idx"]
                 test_input_path = manager.fetcher.train_input_path
                 test_metadata_path = manager.fetcher.train_metadata_path
-                test_idx = train_dataset[model_idx]["test_idx"]
+                test_idx = train_dataset[model_idx]["valid_idx"]
+                train_dataset = train_dataset[model_idx]["train"]
             residualizer = self.set_residualizers(train_dataset)
             residualizers.append(residualizer)
             scalers.append(self.set_scalers(train_dataset, residualizer))
@@ -225,19 +225,24 @@ class MultimodalExperiment(BaseExperiment):
 
     def set_optimizers(self):
         # optimizer definition
-        total_params = sum(p.numel() for p in self.mm_vae.parameters())
-        params = list(self.mm_vae.parameters());
-        print('num parameters: ' + str(total_params))
+        total_params = 0
         optimizers = []
-        for _ in range(self.flags.n_models):
+        for model_idx in range(self.flags.num_models):
+            model = self.models
+            if self.flags.num_models > 1:
+                model = self.models[model_idx]
+            total_params += sum(p.numel() for p in model.parameters())
+            params = list(model.parameters())
+        
             optimizer = optim.Adam(params,
                                 lr=self.flags.initial_learning_rate,
                                 betas=(self.flags.beta_1,
                                 self.flags.beta_2))
             optimizers.append(optimizer)
-        if self.flags.n_models == 1:
+        if self.flags.num_models == 1:
             optimizers = optimizers[0]
         self.optimizers = optimizers
+        print('num parameters: ' + str(total_params))
 
     def set_rec_weights(self):
         rec_weights = dict()
@@ -254,12 +259,15 @@ class MultimodalExperiment(BaseExperiment):
         transform = transforms.Compose([transforms.ToTensor()])
         return transform
 
-    def get_test_samples(self, num_images=2):
+    def get_test_samples(self, model_idx=None, num_images=2):
         n_test = len(self.dataset_test)
         samples = []
         for i in range(num_images):
             ix = random.randint(0, n_test-1)
-            sample, _, _ = self.dataset_test[ix]
+            dataset_test = self.dataset_test
+            if self.flags.num_models > 1:
+                dataset_test = dataset_test[model_idx]
+            sample, _, _ = dataset_test[ix]
             for key in sample.keys():
                 if sample[key] is not None:
                     sample[key] = sample[key].to(self.flags.device)

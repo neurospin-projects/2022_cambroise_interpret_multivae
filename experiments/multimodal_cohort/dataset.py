@@ -106,35 +106,16 @@ class MultimodalDataset(torch.utils.data.Dataset):
             for mod in self.modalities if idx_per_mod[mod] is not None}
         if self.metadata is not None:
             ret["metadata"] = self.metadata.iloc[idx].to_dict()
-        # ret["index"] = idx
         if self.on_the_fly_transform is not None:
             transform = self.on_the_fly_transform
             for mod in self.modalities:
                 if mod in ret.keys():
                     data = ret[mod]
-                    # n_channels = data.shape[-1]
                     data = torch.tensor(data)
                     if type(transform) == dict and mod in transform.keys():
                         ret[mod] = transform[mod](data)
                     elif type(transform) != dict:
                         ret[mod] = transform(data)
-                    # if self.residualizers is not None and mod in self.residualizers:
-                    #     back_to_tensor = False
-                    #     if type(data) is torch.Tensor:
-                    #         back_to_tensor = True
-                    #         data = data.cpu().detach().numpy()
-                    #     columns = self.column_names[mod]
-                    #     t = time.time()
-                    #     df = pd.concat([pd.DataFrame({key: [value] for key, value in ret["metadata"].items()}),
-                    #                    pd.DataFrame(data[np.newaxis, :], columns=columns)],
-                    #                   axis=1)
-                    #     print("building df : ", time.time() - t)
-                    #     t = time.time()
-                    #     new_data = self.residualizers[mod].transform(df) 
-                    #     print("residualizing : ", time.time() - t)
-                    #     if back_to_tensor:
-                    #         new_data = torch.Tensor(new_data[columns].values).squeeze()
-                    #     ret[mod] = new_data
         if self.on_the_fly_inter_transform is not None:
             ret = self.on_the_fly_inter_transform(ret)
         label = 0
@@ -150,7 +131,10 @@ class MultimodalDataset(torch.utils.data.Dataset):
         for idx in all_idx:
             modalities = []
             for mod in self.modalities:
-                if self.idx_per_mod[mod][idx] is not None:
+                true_idx = idx
+                if self.indices is not None:
+                    true_idx = self.indices[idx]
+                if self.idx_per_mod[mod][true_idx] is not None:
                     modalities.append(mod)
             for sub_idx, subset in enumerate(self.modality_subsets):
                 if (all([mod in subset for mod in modalities]) and
@@ -226,7 +210,7 @@ class DataManager(object):
 
         if validation is not None:
             assert (type(validation) is int) and (validation > 0)
-            idx_per_mod = np.load(idx_path, mmap_mode="r")
+            idx_per_mod = np.load(idx_path, mmap_mode="r", allow_pickle=True)
             metadata = pd.read_table(metadata_path)
             modalities = list(idx_per_mod)
             full_indices = []
@@ -291,16 +275,15 @@ class DataManager(object):
 class MissingModalitySampler(torch.utils.data.Sampler):
     """
     """
-    def __init__(self, dataset, batch_size, stratify=None, discretize=None,
-                 seed=42):
+    def __init__(self, dataset, batch_size, indices=None, stratify=None,
+                 discretize=None, seed=42):
         super().__init__(dataset)
         self.dataset = dataset
+        self.indices = indices
         self.batch_size = batch_size
         self.stratify = stratify
         self.discretize = discretize
         self.seed = seed
-
-        self.idx_per_modality_subset = self.dataset.idx_per_modality_subset.copy()
 
     def __len__(self):
         size = 0
@@ -318,22 +301,26 @@ class MissingModalitySampler(torch.utils.data.Sampler):
         complete_batch_indices = []
         for idx, _ in enumerate(self.dataset.modality_subsets):
             local_batch_idx = 0
-            n_batchs = (len(idx_per_modality_subset[idx]) +
+            mod_subset_idx = idx_per_modality_subset[idx]
+            n_batchs = (len(mod_subset_idx) +
                          self.batch_size - 1) // self.batch_size
             if self.stratify is not None and n_batchs > 1:
-                metadata = self.dataset.metadata.iloc[idx_per_modality_subset[idx]]
+                real_indices = mod_subset_idx.copy()
+                if self.indices is not None:
+                    real_indices = self.indices[mod_subset_idx].tolist()
+                metadata = self.dataset.metadata.iloc[real_indices]
                 splitter = MultilabelStratifiedKFold(
                     n_batchs, shuffle=True, random_state=self.seed)
                 y = metadata[self.stratify].copy()
                 for name in self.stratify:
                     if name in self.discretize:
                         y[name] = discretizer(y[name].values)
-                splitted = splitter.split(idx_per_modality_subset[idx], y)
-            while ((len(idx_per_modality_subset[idx]) > 0 and
+                splitted = splitter.split(mod_subset_idx, y)
+            while ((len(mod_subset_idx) > 0 and
                     (self.stratify is None or n_batchs == 1)) or
                    (self.stratify is not None and n_batchs > 1 and
                     local_batch_idx < n_batchs)):
-                size = min(len(idx_per_modality_subset[idx]),
+                size = min(len(mod_subset_idx),
                            self.batch_size)
                 if size < self.batch_size:
                     incomplete_batch_indices.append(batch_idx)
@@ -341,13 +328,13 @@ class MissingModalitySampler(torch.utils.data.Sampler):
                     complete_batch_indices.append(batch_idx)
                 if self.stratify is None or n_batchs == 1:
                     new_indices = np.random.choice(
-                        idx_per_modality_subset[idx],
+                        mod_subset_idx,
                         size=size, replace=False)
                     for i in new_indices:
-                        idx_per_modality_subset[idx].remove(i)
+                        mod_subset_idx.remove(i)
                 else:
                     _, new_indices = next(splitted)
-                    new_indices = np.array(idx_per_modality_subset[idx])[new_indices]
+                    new_indices = np.array(mod_subset_idx)[new_indices]
                 indices.append(new_indices)
                 batch_idx += 1
                 local_batch_idx += 1

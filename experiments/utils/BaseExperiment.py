@@ -24,7 +24,7 @@ class BaseExperiment(ABC):
 
 
     @abstractmethod
-    def set_model(self):
+    def set_models(self):
         pass;
 
     @abstractmethod
@@ -32,11 +32,11 @@ class BaseExperiment(ABC):
         pass;
 
     @abstractmethod
-    def set_dataset(self):
+    def set_datasets(self):
         pass;
 
     @abstractmethod
-    def set_optimizer(self):
+    def set_optimizers(self):
         pass;
 
     @abstractmethod

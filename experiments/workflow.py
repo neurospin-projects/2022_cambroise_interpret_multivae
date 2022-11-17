@@ -107,7 +107,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         joint_elbo=False, kl_annealing=0, include_prior_expert=False,
         learn_output_scale=learn_output_scale, learn_output_sample_scale=out_scale_per_subject,
         len_sequence=8, likelihood=likelihood, load_saved=False, method='joint_elbo',
-        mm_vae_save="mm_vae", modality_jsd=False, modality_moe=False,
+        model_save="model", modality_jsd=False, modality_moe=False,
         modality_poe=False, num_channels_m1=1, num_channels_m2=3,
         num_classes=2, num_hidden_layer_encoder=num_hidden_layer_encoder,
         num_hidden_layer_decoder=num_hidden_layer_decoder,
@@ -152,14 +152,16 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
             dataset=[flags.dataset],
             out_scale_per_subject=[flags.learn_output_sample_scale],
             n_hidden_layer_encoder=[flags.num_hidden_layer_encoder],
-            n_hidden_layer_decoder=[flags.num_hidden_layer_decoder]))
+            n_hidden_layer_decoder=[flags.num_hidden_layer_decoder],
+            allow_missing_modalities=[flags.allow_missing_modalities]))
         runs = pd.concat((runs, new_run))
     else:
         runs = dict(name=[],
                     dataset=[],
                     out_scale_per_subject=[],
                     n_hidden_layer_encoder=[],
-                    n_hidden_layer_decoder=[])
+                    n_hidden_layer_decoder=[],
+                    allow_missing_modalities=[])
         for run in os.listdir(flags.dir_experiment):
             if run.startswith("hbn") or run.startswith("euaims"):
                 flags = torch.load(os.path.join(flags.dir_experiment, run, "flags.rar"))
@@ -168,6 +170,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
                 runs["out_scale_per_subject"].append(flags.learn_output_sample_scale)
                 runs["n_hidden_layer_encoder"].append(flags.num_hidden_layer_encoder)
                 runs["n_hidden_layer_decoder"].append(flags.num_hidden_layer_decoder)
+                runs["allow_missing_modalities"].append(flags.allow_missing_modalities)
         runs = pd.DataFrame(runs)
     runs.to_csv(os.path.join(flags.dir_experiment, "runs.tsv"), index=False, sep="\t")
 

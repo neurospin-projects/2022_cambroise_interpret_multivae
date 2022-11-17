@@ -70,19 +70,21 @@ def calc_style_kld(exp, klds):
 
 
 
-def basic_routine_epoch(exp, batch):
+def basic_routine_epoch(exp, model_idx, batch):
     # set up weights
     beta_style = exp.flags.beta_style
     beta_content = exp.flags.beta_content
     beta = exp.flags.beta
     rec_weight = 1.0
 
-    mm_vae = exp.mm_vae
+    model = exp.models
+    if exp.flags.num_models > 1:
+        model = model[model_idx]
     batch_d = batch[0]
     mods = exp.modalities
     for k, m_key in enumerate(batch_d.keys()):
         batch_d[m_key] = Variable(batch_d[m_key]).to(exp.flags.device).float()
-    results = mm_vae(batch_d)
+    results = model(batch_d)
 
     log_probs, weighted_log_prob = calc_log_probs(exp, results, batch)
     group_divergence = results["joint_divergence"]
@@ -112,7 +114,7 @@ def basic_routine_epoch(exp, batch):
             klds_joint["style"][m_key] = kld_style_m
             if exp.flags.poe_unimodal_elbos:
                 i_batch_mod = {m_key: batch_d[m_key]}
-                r_mod = mm_vae(i_batch_mod)
+                r_mod = model(i_batch_mod)
                 log_prob_mod = -mod.calc_log_prob(r_mod["rec"][m_key],
                                                   batch_d[m_key],
                                                   len(batch_d[m_key]))
@@ -137,21 +139,23 @@ def train(model_idx, epoch, exp, tb_logger):
     model = exp.models
     dataset = exp.dataset_train
     optimizer = exp.optimizers
-    if exp.flags.n_models > 1:
+    sub_indices = None
+    if exp.flags.num_models > 1:
         model = model[model_idx]
         model.train()
         exp.models[model_idx] = model
         dataset = dataset[model_idx]
+        sub_indices = dataset.indices
         optimizer = optimizer[model_idx]
     else:
         model.train()
         exp.models = model
-
-    sampler = MissingModalitySampler(dataset, batch_size=exp.flags.batch_size)
+    sampler = MissingModalitySampler(dataset, batch_size=exp.flags.batch_size,
+                                     indices=sub_indices)
     d_loader = DataLoader(dataset, batch_sampler=sampler, num_workers=8)
 
     for iteration, batch in enumerate(d_loader):
-        basic_routine = basic_routine_epoch(exp, batch)
+        basic_routine = basic_routine_epoch(exp, model_idx, batch)
         results = basic_routine["results"]
         total_loss = basic_routine["total_loss"]
         klds = basic_routine["klds"]
@@ -167,7 +171,7 @@ def test(model_idx, epoch, exp, tb_logger):
     with torch.no_grad():
         model = exp.models
         dataset = exp.dataset_test
-        if exp.flags.n_models > 1:
+        if exp.flags.num_models > 1:
             model = model[model_idx]
             model.eval()
             exp.models[model_idx] = model
@@ -176,11 +180,11 @@ def test(model_idx, epoch, exp, tb_logger):
             model.eval()
             exp.models = model
 
-        sampler = MissingModalitySampler(dataset, batch_size=exp.flags.batch_size)
-        d_loader = DataLoader(dataset, batch_sampler=sampler, num_workers=8)
+        # sampler = MissingModalitySampler(dataset, batch_size=exp.flags.batch_size)
+        d_loader = DataLoader(dataset, batch_size=exp.flags.batch_size, num_workers=8)
 
         for _, batch in enumerate(d_loader):
-            basic_routine = basic_routine_epoch(exp, batch)
+            basic_routine = basic_routine_epoch(exp, model_idx, batch)
             results = basic_routine["results"]
             total_loss = basic_routine["total_loss"]
             klds = basic_routine["klds"]
@@ -204,10 +208,10 @@ def run_epochs(exp):
     str_flags = utils.save_and_log_flags(exp.flags)
 
     print("training epochs progress:")
-    for model_idx in range(exp.flags.n_models):
+    for model_idx in range(exp.flags.num_models):
         log_path = exp.flags.str_experiment
         dir_logs = exp.flags.dir_logs
-        if exp.flags.n_models > 1:
+        if exp.flags.num_models > 1:
             log_path = os.path.join(log_path, f"model_{model_idx}")
             dir_logs = dir_logs[model_idx]
         writer = SummaryWriter(dir_logs)
@@ -223,7 +227,7 @@ def run_epochs(exp):
                 dir_network_epoch = os.path.join(exp.flags.dir_checkpoints,
                                                  str(epoch).zfill(4))
                 model = exp.models
-                if exp.flags.n_models > 1:
+                if exp.flags.num_models > 1:
                     dir_network_epoch = os.path.join(exp.flags.dir_checkpoints,
                                                      f"model_{model_idx}",
                                                      str(epoch).zfill(4))

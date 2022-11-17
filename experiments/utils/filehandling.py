@@ -43,14 +43,17 @@ def create_dir_structure(flags, train=True):
         create_dir(flags.dir_checkpoints)
 
     flags.dir_logs = os.path.join(flags.dir_experiment_run, 'logs')
-    if flags.n_models > 1:
+    if flags.num_models > 1:
         dir_logs = []
-        for model_idx in range(flags.n_models):
+        for model_idx in range(flags.num_models):
             dir = os.path.join(flags.dir_logs, f"model_{model_idx}")
             dir_logs.append(dir)
         flags.dir_logs = dir_logs
     if train:
-        create_dir(flags.dir_logs)
+        if flags.num_models == 1:
+            dir_logs = [flags.dir_logs]
+        for dir in dir_logs:
+            create_dir(dir)
     print(flags.dir_logs)
 
     flags.dir_logs_clf = os.path.join(flags.dir_experiment_run, 'logs_clf')
