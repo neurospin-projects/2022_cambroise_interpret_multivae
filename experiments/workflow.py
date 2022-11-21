@@ -91,6 +91,8 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
     print(input_dims)
     print(type(input_dims))
     print_title(f"TRAIN: {dataset}")
+    # Further analyses for more than 1 models are not yet working
+    num_models = 1
     flags = SimpleNamespace(
         dataset=dataset, datasetdir=datasetdir, num_models=num_models,
         allow_missing_blocks=allow_missing_blocks, batch_size=batch_size,
@@ -223,18 +225,10 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
     print_subtitle("Loading data...")
     flags_file = os.path.join(expdir, "flags.rar")
     if not os.path.isfile(flags_file):
-        raise ValueError("You need first to train the model.")
-    flags = torch.load(flags_file)
-    checkpoints_files = glob.glob(
-        os.path.join(expdir, "checkpoints", "*", flags.model_save))
-    if len(checkpoints_files) == 0:
-        raise ValueError("You need first to train the model.")
-    checkpoints_files = sorted(
-        checkpoints_files, key=lambda path: int(path.split(os.sep)[-2]))
-    checkpoint_file = checkpoints_files[-1]
-    print_text(f"restoring weights: {checkpoint_file}")
+        raise ValueError("You need first to train the model.")    
+    checkpoints_dir = os.path.join(expdir, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
-        flags_file, checkpoint_file)
+        flags_file, checkpoints_dir)
     model = experiment.models
     if type(model) is list:
         for m in model:
@@ -627,18 +621,9 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_samples=301,
     flags_file = os.path.join(expdir, "flags.rar")
     if not os.path.isfile(flags_file):
         raise ValueError("You need first to train the model.")
-    torch.load(flags_file)
-    alphabet_file = os.path.join(os.getcwd(), "alphabet.json")
-    checkpoints_files = glob.glob(
-        os.path.join(expdir, "checkpoints", "*", flags.model_save))
-    if len(checkpoints_files) == 0:
-        raise ValueError("You need first to train the model.")
-    checkpoints_files = sorted(
-        checkpoints_files, key=lambda path: int(path.split(os.sep)[-2]))
-    checkpoint_file = checkpoints_files[-1]
-    print_text(f"restoring weights: {checkpoint_file}")
+    checkpoints_dir = os.path.join(expdir, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
-        flags_file, alphabet_file, checkpoint_file)
+        flags_file, checkpoints_dir)
     model = experiment.models
     if type(model) is list:
         for m in model:

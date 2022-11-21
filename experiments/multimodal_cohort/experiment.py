@@ -1,6 +1,7 @@
 from ctypes import resize
 import random
 import os
+import glob
 import numpy as np
 import pandas as pd
 import json
@@ -86,11 +87,29 @@ class MultimodalExperiment(BaseExperiment):
         self.labels = ['ASD']
     
     @classmethod
-    def get_experiment(cls, flags_file, checkpoint_file):
+    def get_experiment(cls, flags_file, checkpoints_dir, load_epoch=None):
         flags = torch.load(flags_file)
         experiment = MultimodalExperiment(flags)
-        checkpoint = torch.load(checkpoint_file)
-        experiment.mm_vae.load_state_dict(checkpoint)
+        for model_idx in range(flags.num_models):
+            model = experiment.models
+            cp_files = glob.glob(
+                os.path.join(checkpoints_dir, "*", flags.model_save))
+            if flags.num_models > 1:
+                model = experiment.models[model_idx]
+                cp_files = glob.glob(
+                    os.path.join(checkpoints_dir, f"model_{model_idx}", "*", flags.model_save))
+            if len(cp_files) == 0:
+                raise ValueError("You need first to train the model.")
+            cp_files = sorted(
+                cp_files, key=lambda path: int(path.split(os.sep)[-2]))
+            if load_epoch is None:
+                cp_file = cp_files[-1]
+            else:
+                cp_epochs = np.array([int(path.split(os.sep)[-2]) for path in cp_files])
+                cp_file = cp_files[np.argmin(cp_epochs >= load_epoch)]
+            print(cp_file)
+            model.load_state_dict(torch.load(cp_file))
+
         return experiment, flags
 
     def set_models(self):
@@ -213,7 +232,6 @@ class MultimodalExperiment(BaseExperiment):
                                     test_idx,
                                     on_the_fly_transform=self.transform,
                                     transform=transform))
-            print(test[model_idx].metadata.iloc[test_idx])
         if n_models == 1:
             train = train[0]
             test = test[0]
