@@ -224,8 +224,9 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
     flags_file = os.path.join(expdir, "flags.rar")
     if not os.path.isfile(flags_file):
         raise ValueError("You need first to train the model.")
+    flags = torch.load(flags_file)
     checkpoints_files = glob.glob(
-        os.path.join(expdir, "checkpoints", "*", "mm_vae"))
+        os.path.join(expdir, "checkpoints", "*", flags.model_save))
     if len(checkpoints_files) == 0:
         raise ValueError("You need first to train the model.")
     checkpoints_files = sorted(
@@ -234,8 +235,12 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
     print_text(f"restoring weights: {checkpoint_file}")
     experiment, flags = MultimodalExperiment.get_experiment(
         flags_file, checkpoint_file)
-    model = experiment.mm_vae
-    print(model)
+    model = experiment.models
+    if type(model) is list:
+        for m in model:
+            print(model)
+    else:
+        print(model)
     clinical_names = np.load(
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
     rois_names = np.load(
@@ -622,9 +627,10 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_samples=301,
     flags_file = os.path.join(expdir, "flags.rar")
     if not os.path.isfile(flags_file):
         raise ValueError("You need first to train the model.")
+    torch.load(flags_file)
     alphabet_file = os.path.join(os.getcwd(), "alphabet.json")
     checkpoints_files = glob.glob(
-        os.path.join(expdir, "checkpoints", "*", "mm_vae"))
+        os.path.join(expdir, "checkpoints", "*", flags.model_save))
     if len(checkpoints_files) == 0:
         raise ValueError("You need first to train the model.")
     checkpoints_files = sorted(
@@ -633,8 +639,12 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_samples=301,
     print_text(f"restoring weights: {checkpoint_file}")
     experiment, flags = MultimodalExperiment.get_experiment(
         flags_file, alphabet_file, checkpoint_file)
-    model = experiment.mm_vae
-    print(model)
+    model = experiment.models
+    if type(model) is list:
+        for m in model:
+            print(model)
+    else:
+        print(model)
     clinical_names = np.load(
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
     rois_names = np.load(
