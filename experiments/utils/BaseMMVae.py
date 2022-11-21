@@ -25,9 +25,9 @@ class BaseMMVae(ABC, nn.Module):
         encoders = nn.ModuleDict();
         decoders = nn.ModuleDict();
         lhoods = dict();
-        for m, m_key in enumerate(sorted(modalities.keys())):
-            encoders[m_key] = modalities[m_key].encoder;
-            decoders[m_key] = modalities[m_key].decoder;
+        for m, m_key in enumerate(modalities.keys()):
+            encoders[m_key] = modalities[m_key].encoder(flags, m);
+            decoders[m_key] = modalities[m_key].decoder(flags, m);
             lhoods[m_key] = modalities[m_key].likelihood;
         self.encoders = encoders;
         self.decoders = decoders;

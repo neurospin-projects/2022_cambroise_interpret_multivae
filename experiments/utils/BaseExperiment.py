@@ -56,13 +56,16 @@ class BaseExperiment(ABC):
         pass;
 
     def set_subsets(self):
-        num_mods = len(list(self.modalities.keys()));
+        modalities = self.modalities
+        if type(self.modalities) is list:
+            modalities = modalities[0]
+        num_mods = len(list(modalities.keys()));
 
         """
         powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3)
         (1,2,3)
         """
-        xs = list(self.modalities)
+        xs = list(modalities)
         # note we return an iterator rather than a list
         subsets_list = chain.from_iterable(combinations(xs, n) for n in
                                           range(len(xs)+1))
@@ -70,7 +73,7 @@ class BaseExperiment(ABC):
         for k, mod_names in enumerate(subsets_list):
             mods = [];
             for l, mod_name in enumerate(sorted(mod_names)):
-                mods.append(self.modalities[mod_name])
+                mods.append(modalities[mod_name])
             key = '_'.join(sorted(mod_names));
             subsets[key] = mods;
         return subsets;

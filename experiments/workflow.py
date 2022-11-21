@@ -153,7 +153,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
             out_scale_per_subject=[flags.learn_output_sample_scale],
             n_hidden_layer_encoder=[flags.num_hidden_layer_encoder],
             n_hidden_layer_decoder=[flags.num_hidden_layer_decoder],
-            allow_missing_modalities=[flags.allow_missing_modalities]))
+            allow_missing_blocks=[flags.allow_missing_blocks]))
         runs = pd.concat((runs, new_run))
     else:
         runs = dict(name=[],
@@ -161,7 +161,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
                     out_scale_per_subject=[],
                     n_hidden_layer_encoder=[],
                     n_hidden_layer_decoder=[],
-                    allow_missing_modalities=[])
+                    allow_missing_blocks=[])
         for run in os.listdir(flags.dir_experiment):
             if run.startswith("hbn") or run.startswith("euaims"):
                 flags = torch.load(os.path.join(flags.dir_experiment, run, "flags.rar"))
@@ -170,7 +170,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
                 runs["out_scale_per_subject"].append(flags.learn_output_sample_scale)
                 runs["n_hidden_layer_encoder"].append(flags.num_hidden_layer_encoder)
                 runs["n_hidden_layer_decoder"].append(flags.num_hidden_layer_decoder)
-                runs["allow_missing_modalities"].append(flags.allow_missing_modalities)
+                runs["allow_missing_blocks"].append(flags.allow_missing_blocks)
         runs = pd.DataFrame(runs)
     runs.to_csv(os.path.join(flags.dir_experiment, "runs.tsv"), index=False, sep="\t")
 

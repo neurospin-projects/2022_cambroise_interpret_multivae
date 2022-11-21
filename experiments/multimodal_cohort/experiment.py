@@ -69,7 +69,7 @@ class MultimodalExperiment(BaseExperiment):
         #     continuous=["age"],
         #     categorical=["sex", "site"]
         # )
-        self.modalities = self.set_modalities()
+        self.modalities, self.mod_names = self.set_modalities()
         self.subsets = self.set_subsets()
         self.dataset_train = None
         self.dataset_test = None
@@ -108,15 +108,17 @@ class MultimodalExperiment(BaseExperiment):
         elif len(self.flags.style_dim) != self.num_modalities:
             self.flags.style_dim = [self.flags.style_dim[0]] * self.num_modalities
         mods = [Clinical, Rois]
-        mods = [mods[m](self.flags.input_dim[m], Encoder(self.flags, m),
-                        Decoder(self.flags, m), self.flags.class_dim,
-                        self.flags.style_dim[m], self.flags.likelihood) for m in range(self.num_modalities)]
+        mods = [mods[m](self.flags.input_dim[m], Encoder,
+                        Decoder, self.flags.class_dim,
+                        self.flags.style_dim[m], self.flags.likelihood)
+                        for m in range(self.num_modalities)]
         mods_dict = {m.name: m for m in mods}
-        return mods_dict
+        mod_names = list(mods_dict)
+        return mods_dict, mod_names
 
     def set_scalers(self, dataset, residualizers=None):
         scalers = {}
-        for mod in self.modalities:
+        for mod in self.mod_names:
             scaler = StandardScaler()
             all_training_data = []
             all_metadata = []
@@ -211,6 +213,7 @@ class MultimodalExperiment(BaseExperiment):
                                     test_idx,
                                     on_the_fly_transform=self.transform,
                                     transform=transform))
+            print(test[model_idx].metadata.iloc[test_idx])
         if n_models == 1:
             train = train[0]
             test = test[0]
