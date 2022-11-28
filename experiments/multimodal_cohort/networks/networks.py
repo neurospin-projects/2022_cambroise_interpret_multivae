@@ -73,6 +73,6 @@ class Decoder(nn.Module):
             logvar = self.logvar(h)
         else:
             logvar = self.logvar
-        return x_hat, torch.clamp((logvar * 0.5).exp(), min=1e-4).to(z.device)
+        return x_hat, (logvar * 0.5).exp().to(z.device)
 
 

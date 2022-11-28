@@ -153,9 +153,9 @@ def train(model_idx, epoch, exp, tb_logger):
     sampler = MissingModalitySampler(dataset, batch_size=exp.flags.batch_size,
                                      indices=sub_indices)
     d_loader = DataLoader(dataset, batch_sampler=sampler, num_workers=8)
-
     for iteration, batch in enumerate(d_loader):
-        basic_routine = basic_routine_epoch(exp, model_idx, batch)
+        with torch.autocast(exp.flags.device.type):
+            basic_routine = basic_routine_epoch(exp, model_idx, batch)
         results = basic_routine["results"]
         total_loss = basic_routine["total_loss"]
         klds = basic_routine["klds"]

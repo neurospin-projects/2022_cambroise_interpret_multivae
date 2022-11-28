@@ -15,6 +15,7 @@ Organize the analysis steps.
 # System import
 import fire
 import workflow as wf
+from analyze_avatars import analyze_avatars
 
 
 fire.Fire({
@@ -27,4 +28,5 @@ fire.Fire({
     "rsa-plot": wf.rsa_plot_exp,
     "hist-plot": wf.hist_plot_exp,
     "avatar-plot": wf.avatar_plot_exp,
+    "daa-analysis": analyze_avatars,
 })

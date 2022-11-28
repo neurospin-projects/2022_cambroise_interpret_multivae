@@ -89,6 +89,8 @@ class MultimodalExperiment(BaseExperiment):
     @classmethod
     def get_experiment(cls, flags_file, checkpoints_dir, load_epoch=None):
         flags = torch.load(flags_file)
+        if not "num_models" in vars(flags):
+            flags.num_models = 1
         experiment = MultimodalExperiment(flags)
         for model_idx in range(flags.num_models):
             model = experiment.models
