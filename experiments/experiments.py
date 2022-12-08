@@ -15,7 +15,7 @@ Organize the analysis steps.
 # System import
 import fire
 import workflow as wf
-from analyze_avatars import analyze_avatars
+from analyze_avatars import analyze_avatars, assess_robustness, univariate_tests
 
 
 fire.Fire({
@@ -29,4 +29,6 @@ fire.Fire({
     "hist-plot": wf.hist_plot_exp,
     "avatar-plot": wf.avatar_plot_exp,
     "daa-analysis": analyze_avatars,
+    "daa-robustness": assess_robustness,
+    "univariate-tests": univariate_tests
 })
