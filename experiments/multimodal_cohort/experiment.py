@@ -70,6 +70,8 @@ class MultimodalExperiment(BaseExperiment):
         #     continuous=["age"],
         #     categorical=["sex", "site"]
         # )
+        if "data_seed" not in vars(self.flags):
+            self.flags.data_seed = "defaults"
         self.modalities, self.mod_names = self.set_modalities()
         self.subsets = self.set_subsets()
         self.dataset_train = None
@@ -202,7 +204,8 @@ class MultimodalExperiment(BaseExperiment):
         manager = DataManager(self.flags.dataset, self.flags.datasetdir,
                                 list(self.modalities), overwrite=True,
                                 allow_missing_blocks=self.flags.allow_missing_blocks,
-                                validation=validation, test_size=test_size)
+                                validation=validation, test_size=test_size,
+                                seed=self.flags.data_seed)
         for model_idx in range(n_models):
             train_dataset = manager.train_dataset
             train_idx = None

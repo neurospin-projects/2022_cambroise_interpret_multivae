@@ -116,7 +116,8 @@ def assess_robustness(dataset, datasetdir, outdir, run, n_validation=5,
     params = SimpleNamespace(
         n_validation=n_validation, n_subjects=n_subjects, M=M,
         n_samples=n_samples, reg_method=reg_method,
-        sampling=sampling_strategy, sample_latents=sample_latents)
+        sampling=sampling_strategy, sample_latents=sample_latents,
+        seed=seed)
 
     name = "_".join(["_".join([key, str(val)])
                      for key, val in params.__dict__.items()])

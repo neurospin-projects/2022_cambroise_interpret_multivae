@@ -105,7 +105,7 @@ def basic_routine_epoch(exp, model_idx, batch):
         klds_joint = {"content": group_divergence,
                       "style": dict()}
         elbos = dict()
-        for m, m_key in enumerate(mods.keys()):
+        for m, m_key in enumerate(batch_d.keys()):
             mod = mods[m_key]
             if exp.flags.factorized_representation:
                 kld_style_m = klds_style[m_key + "_style"]

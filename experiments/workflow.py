@@ -39,13 +39,14 @@ from color_utils import (
 
 
 def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
-              latent_dim=20, style_dim=[3, 20],
+              latent_dim=20, style_dim=[3, 20], data_seed="defaults",
               num_hidden_layer_encoder=1, num_hidden_layer_decoder=0,
-              allow_missing_blocks=True, factorized_representation=True, beta=1., 
+              allow_missing_blocks=True, factorized_representation=True,
               likelihood="normal", initial_learning_rate=0.002, batch_size=256,
-              num_epochs=1500, eval_freq=25, eval_freq_fid=100,
+              num_epochs=1500, eval_freq=25, eval_freq_fid=100, beta=1.,
               data_multiplications=1, dropout_rate=0., initial_out_logvar=-3.,
-              learn_output_scale=True, out_scale_per_subject=False):
+              learn_output_scale=True, out_scale_per_subject=False,
+              method="joint_elbo"):
     """ Train the model.
     Parameters
     ----------
@@ -108,7 +109,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         initial_out_logvar=initial_out_logvar, input_dim=input_dims,
         joint_elbo=False, kl_annealing=0, include_prior_expert=False,
         learn_output_scale=learn_output_scale, learn_output_sample_scale=out_scale_per_subject,
-        len_sequence=8, likelihood=likelihood, load_saved=False, method='joint_elbo',
+        len_sequence=8, likelihood=likelihood, load_saved=False, method=method,
         model_save="model", modality_jsd=False, modality_moe=False,
         modality_poe=False, num_channels_m1=1, num_channels_m2=3,
         num_classes=2, num_hidden_layer_encoder=num_hidden_layer_encoder,
@@ -116,7 +117,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         dropout_rate=dropout_rate,
         num_samples_fid=10000, num_training_samples_lr=500,
         poe_unimodal_elbos=True, save_figure=False, start_epoch=0, style_dim=style_dim,
-        subsampled_reconstruction=True)
+        subsampled_reconstruction=True, data_seed=data_seed)
     print(flags)
     use_cuda = torch.cuda.is_available()
     flags.device = torch.device("cuda" if use_cuda else "cpu")
@@ -180,7 +181,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
 def daa_exp(dataset, datasetdir, outdir, run, sampling_strategy="likelihood",
             n_validation=5, n_samples=200, n_subjects=50,
             M=1000, trust_level=0.75, seed=1037, reg_method="hierarchical",
-            sample_latents=True):
+            sample_latents=True, n_votes=5):
     """ Perform the digital avatars analysis using clinical scores taverses
     to influence the imaging part.
     Parameters
@@ -249,7 +250,8 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling_strategy="likelihood",
     params = SimpleNamespace(
             n_validation=n_validation, n_subjects=n_subjects, M=M,
             n_samples=n_samples, reg_method=reg_method,
-            sampling=sampling_strategy, sample_latents=sample_latents)
+            sampling=sampling_strategy, sample_latents=sample_latents,
+            seed=seed)
     if seed is not None:
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -521,7 +523,7 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling_strategy="likelihood",
     val_axis = 0 if n_models == 1 else 1
     idx_sign = ((pvalues < significativity_thr).sum(axis=val_axis) >= trust_level)
     if n_models > 1:
-        idx_sign = idx_sign.sum(0) == n_models
+        idx_sign = idx_sign.sum(0) >= n_votes
     print(idx_sign.shape)
     data = {"metric": [], "roi": [], "score": []}
     for idx, score in enumerate(clinical_names):
@@ -597,7 +599,8 @@ def anova_exp(dataset, datasetdir, outdir, run, n_validation=5,
     params = SimpleNamespace(
         n_validation=n_validation, n_subjects=n_subjects, M=M,
         n_samples=n_samples, reg_method=reg_method,
-        sampling=sampling_strategy, sample_latents=sample_latents)
+        sampling=sampling_strategy, sample_latents=sample_latents,
+        seed=seed)
     if seed is not None:
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -619,7 +622,7 @@ def anova_exp(dataset, datasetdir, outdir, run, n_validation=5,
     val_axis = 0 if n_models == 1 else 1
     idx_sign = ((pvalues < significativity_thr).sum(axis=val_axis) >= trust_level)
     if n_models > 1:
-        idx_sign = idx_sign.sum(0) == n_models
+        idx_sign = idx_sign.sum(0) >= n_votes
     modified_rois_names = [
         name.replace("&", "_").replace("-", "_") for name in rois_names]
     anova_pvalues = np.zeros((n_models, n_validation, n_scores, n_rois))
@@ -891,7 +894,7 @@ def rsa_plot_exp(dataset, datasetdir, outdir, run):
 
 def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
                             n_rois=5, plot_radar=True, plot_rois=True,
-                            plot_associations=False):
+                            plot_associations=False, n_votes=5):
     """ Display specified score histogram across different cohorts.
     Parameters
     ----------
@@ -946,7 +949,7 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
         val_axis = 0 if n_models == 1 else 1
         idx_sign = ((pvalues < significativity_thr).sum(axis=val_axis) >= local_trust_level)
         if n_models > 1:
-            idx_sign = idx_sign.sum(0) == n_models
+            idx_sign = idx_sign.sum(0) >= n_votes
         data = {"metric": [], "roi": [], "score": []}
         for idx, score in enumerate(clinical_names):
             rois_idx = np.where(idx_sign[idx])
@@ -1101,7 +1104,8 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
                 print_result(f"flow for the {_metric} metric: {filename}")
 
 def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
-                          trust_level=0.7, plot_rois=True, plot_weights=True):
+                          trust_level=0.7, plot_rois=True, plot_weights=True,
+                          n_votes=5):
     """ Display specified score and metric associations
     Parameters
     ----------
@@ -1154,7 +1158,7 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
         val_axis = 0 if n_models == 1 else 1
         idx_sign = ((pvalues < significativity_thr).sum(axis=val_axis) >= local_trust_level)
         if n_models > 1:
-            idx_sign = idx_sign.sum(0) == n_models
+            idx_sign = idx_sign.sum(0) >= n_votes
         data = {"metric": [], "roi": [], "score": []}
         for idx, _score in enumerate(clinical_names):
             rois_idx = np.where(idx_sign[idx])
