@@ -894,7 +894,7 @@ def rsa_plot_exp(dataset, datasetdir, outdir, run):
 
 def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
                             n_rois=5, plot_radar=True, plot_rois=True,
-                            plot_associations=False, n_votes=5):
+                            plot_associations=False, n_votes=5, rescaled=True):
     """ Display specified score histogram across different cohorts.
     Parameters
     ----------
@@ -925,7 +925,13 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
                if os.path.isdir(path)]
     print_text(f"Simulation directories: {','.join(simdirs)}")
 
-    flags = torch.load(os.path.join(expdir, "flags.rar"))
+    flags_file = os.path.join(expdir, "flags.rar")
+    if not os.path.isfile(flags_file):
+        raise ValueError("You need first to train the model.")    
+    checkpoints_dir = os.path.join(expdir, "checkpoints")
+    experiment, flags = MultimodalExperiment.get_experiment(
+        flags_file, checkpoints_dir)
+
     clinical_names = np.load(
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
     clinical_names = clinical_names.tolist()
@@ -934,6 +940,7 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
     rois_names = rois_names.tolist()
     significativity_thr = 0.05 / len(clinical_names) / len(rois_names)
     n_models = flags.num_models
+    scalers = experiment.scalers
 
     marker_signif = "star"
     marker_non_signif = "circle"
@@ -1105,7 +1112,7 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
 
 def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
                           trust_level=0.7, plot_rois=True, plot_weights=True,
-                          n_votes=5):
+                          n_votes=5, rescaled=True):
     """ Display specified score and metric associations
     Parameters
     ----------
@@ -1135,7 +1142,13 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
                if os.path.isdir(path)]
     print_text(f"Simulation directories: {','.join(simdirs)}")
 
-    flags = torch.load(os.path.join(expdir, "flags.rar"))
+    flags_file = os.path.join(expdir, "flags.rar")
+    if not os.path.isfile(flags_file):
+        raise ValueError("You need first to train the model.")    
+    checkpoints_dir = os.path.join(expdir, "checkpoints")
+    experiment, flags = MultimodalExperiment.get_experiment(
+        flags_file, checkpoints_dir)
+
     clinical_names = np.load(
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
     clinical_names = clinical_names.tolist()
@@ -1144,6 +1157,7 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
     rois_names = rois_names.tolist()
     significativity_thr = 0.05 / len(clinical_names) / len(rois_names)
     n_models = flags.num_models
+    scalers = experiment.scalers
 
     print(significativity_thr)
     for dirname in simdirs:
@@ -1172,10 +1186,26 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
 
         areas = df["roi"][(df["metric"] == metric) & (df["score"] == score)].to_list()
         area_idx = [rois_names.index(f"{name}_{metric}") for name in areas]
+        score_idx = clinical_names.index(score)
         if n_models > 1:
-            values = coefs[:, :, clinical_names.index(score), area_idx].mean(axis=(0, 1))
+            values = coefs[:, :, score_idx, area_idx].mean(axis=(0, 1))
+            if rescaled:
+                scaling_factors = []
+                for roi_idx in area_idx:
+                    scaling_factor = sum([
+                        scalers[i]["rois"].scale_[roi_idx] /
+                        scalers[i]["clinical"].scale_[score_idx]
+                        for i in range(n_models)]) / n_models
+                    scaling_factors.append(scaling_factor)
+                scaling_factors = np.asarray(scaling_factors)
+                values *= scaling_factors
         else:
-            values = coefs[:, clinical_names.index(score), area_idx].mean(0)
+            values = coefs[:, score_idx, area_idx].mean(0)
+            if rescaled:
+                scaling_factors = [scalers["rois"].scale_[roi_idx] /
+                    scalers["clinical"].scale_[score_idx] for roi_idx in area_idx]
+                scaling_factors = np.asarray(scaling_factors)
+                values *= scaling_factors
 
         print_subtitle(f"Plot regression coefficients ...")
         color_name = "Plotly"
