@@ -139,6 +139,7 @@ def train(model_idx, epoch, exp, tb_logger):
     model = exp.models
     dataset = exp.dataset_train
     optimizer = exp.optimizers
+    grad_scaler = exp.grad_scalers
     sub_indices = None
     if exp.flags.num_models > 1:
         model = model[model_idx]
@@ -147,6 +148,7 @@ def train(model_idx, epoch, exp, tb_logger):
         dataset = dataset[model_idx]
         sub_indices = dataset.indices
         optimizer = optimizer[model_idx]
+        grad_scaler = grad_scaler[model_idx]
     else:
         model.train()
         exp.models = model
@@ -154,16 +156,31 @@ def train(model_idx, epoch, exp, tb_logger):
                                      indices=sub_indices)
     d_loader = DataLoader(dataset, batch_sampler=sampler, num_workers=8)
     for iteration, batch in enumerate(d_loader):
-        with torch.autocast(exp.flags.device.type):
-            basic_routine = basic_routine_epoch(exp, model_idx, batch)
+        # with torch.autocast(exp.flags.device.type):
+        basic_routine = basic_routine_epoch(exp, model_idx, batch)
         results = basic_routine["results"]
         total_loss = basic_routine["total_loss"]
         klds = basic_routine["klds"]
         log_probs = basic_routine["log_probs"]
         # backprop
-        optimizer.zero_grad()
-        total_loss.backward()
-        optimizer.step()
+        if exp.flags.grad_scaling:
+            grad_scaler.scale(total_loss).backward()
+
+            # Unscales the gradients of optimizer's assigned params in-place
+            # grad_scaler.unscale_(optimizer)
+            # Since the gradients of optimizer's assigned params are unscaled, clips as usual:
+            # torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
+
+            # optimizer's gradients are already unscaled, so grad_scaler.step does not unscale them,
+            # although it still skips optimizer.step() if the gradients contain infs or NaNs.
+            grad_scaler.step(optimizer)
+            # Updates the scale for next iteration.
+            grad_scaler.update()
+        else:
+            optimizer.zero_grad()
+            total_loss.backward()
+            optimizer.step()
+        
         tb_logger.write_training_logs(results, total_loss, log_probs, klds)
 
 

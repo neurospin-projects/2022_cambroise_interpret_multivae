@@ -42,11 +42,11 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
               latent_dim=20, style_dim=[3, 20], data_seed="defaults",
               num_hidden_layer_encoder=1, num_hidden_layer_decoder=0,
               allow_missing_blocks=True, factorized_representation=True,
-              likelihood="normal", initial_learning_rate=0.002, batch_size=256,
+              likelihood="normal", learning_rate=0.002, batch_size=256,
               num_epochs=1500, eval_freq=25, eval_freq_fid=100, beta=1.,
               data_multiplications=1, dropout_rate=0., initial_out_logvar=-3.,
               learn_output_scale=True, out_scale_per_subject=False,
-              method="joint_elbo"):
+              method="joint_elbo", grad_scaling=False):
     """ Train the model.
     Parameters
     ----------
@@ -105,7 +105,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         end_epoch=num_epochs, eval_freq=eval_freq, eval_freq_fid=eval_freq_fid,
         factorized_representation=factorized_representation, img_size_m1=28, img_size_m2=32,
         inception_state_dict="../inception_state_dict.pth",
-        initial_learning_rate=initial_learning_rate,
+        initial_learning_rate=learning_rate,
         initial_out_logvar=initial_out_logvar, input_dim=input_dims,
         joint_elbo=False, kl_annealing=0, include_prior_expert=False,
         learn_output_scale=learn_output_scale, learn_output_sample_scale=out_scale_per_subject,
@@ -117,7 +117,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         dropout_rate=dropout_rate,
         num_samples_fid=10000, num_training_samples_lr=500,
         poe_unimodal_elbos=True, save_figure=False, start_epoch=0, style_dim=style_dim,
-        subsampled_reconstruction=True, data_seed=data_seed)
+        subsampled_reconstruction=True, data_seed=data_seed, grad_scaling=grad_scaling)
     print(flags)
     use_cuda = torch.cuda.is_available()
     flags.device = torch.device("cuda" if use_cuda else "cpu")
