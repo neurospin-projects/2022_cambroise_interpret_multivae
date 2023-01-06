@@ -18,18 +18,18 @@ class Encoder(nn.Module):
             self.shared_encoder.append(nn.ReLU())
             self.shared_encoder.append(nn.Dropout(flags.dropout_rate))
             input_dim = output_dim
-        style_dim = flags.style_dim[mod_num]
+        self.style_dim = flags.style_dim[mod_num]
         # content branch
         self.class_mu = nn.Linear(input_dim, flags.class_dim)
         self.class_logvar = nn.Linear(input_dim, flags.class_dim)
         # optional style branch
-        if flags.factorized_representation:
-            self.style_mu = nn.Linear(input_dim, style_dim)
-            self.style_logvar = nn.Linear(input_dim, style_dim)
+        if flags.factorized_representation and self.style_dim > 0:
+            self.style_mu = nn.Linear(input_dim, self.style_dim)
+            self.style_logvar = nn.Linear(input_dim, self.style_dim)
 
     def forward(self, h):
         h = self.shared_encoder(h)
-        if self.flags.factorized_representation:
+        if self.flags.factorized_representation and self.style_dim > 0:
             return self.style_mu(h), self.style_logvar(h), self.class_mu(h), \
                    self.class_logvar(h)
         else:
@@ -45,7 +45,8 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.flags = flags
         self.shared_decoder = nn.Sequential()
-        input_dim = flags.style_dim[mod_num] + flags.class_dim
+        self.style_dim = flags.style_dim[mod_num]
+        input_dim = self.style_dim + flags.class_dim
         output_dim = 256
         for _ in range(flags.num_hidden_layer_decoder):
             self.shared_decoder.append(nn.Linear(input_dim, output_dim))
@@ -63,7 +64,7 @@ class Decoder(nn.Module):
                 requires_grad=flags.learn_output_scale)
 
     def forward(self, style_latent_space, class_latent_space):
-        if self.flags.factorized_representation:
+        if self.flags.factorized_representation and self.style_dim > 0:
             z = torch.cat((style_latent_space, class_latent_space), dim=1)
         else:
             z = class_latent_space

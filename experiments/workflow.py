@@ -181,7 +181,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
 def daa_exp(dataset, datasetdir, outdir, run, sampling_strategy="likelihood",
             n_validation=5, n_samples=200, n_subjects=50,
             M=1000, trust_level=0.75, seed=1037, reg_method="hierarchical",
-            sample_latents=True, n_votes=5):
+            sample_latents=True, vote_prop=1):
     """ Perform the digital avatars analysis using clinical scores taverses
     to influence the imaging part.
     Parameters
@@ -523,7 +523,7 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling_strategy="likelihood",
     val_axis = 0 if n_models == 1 else 1
     idx_sign = ((pvalues < significativity_thr).sum(axis=val_axis) >= trust_level)
     if n_models > 1:
-        idx_sign = idx_sign.sum(0) >= n_votes
+        idx_sign = idx_sign.sum(0) >= vote_prop * n_models
     print(idx_sign.shape)
     data = {"metric": [], "roi": [], "score": []}
     for idx, score in enumerate(clinical_names):
@@ -543,7 +543,7 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling_strategy="likelihood",
 def anova_exp(dataset, datasetdir, outdir, run, n_validation=5,
               n_samples=200, n_subjects=50, sampling_strategy="likelihood",
               M=1000, trust_level=0.75, seed=1037, reg_method="hierarchical",
-              sample_latents=True):
+              sample_latents=True, vote_prop=1):
     """ Perform the anova analysis one the subjects coefficient to see if
     there is any site effect.
     Parameters
@@ -622,7 +622,7 @@ def anova_exp(dataset, datasetdir, outdir, run, n_validation=5,
     val_axis = 0 if n_models == 1 else 1
     idx_sign = ((pvalues < significativity_thr).sum(axis=val_axis) >= trust_level)
     if n_models > 1:
-        idx_sign = idx_sign.sum(0) >= n_votes
+        idx_sign = idx_sign.sum(0) >= vote_prop * n_models
     modified_rois_names = [
         name.replace("&", "_").replace("-", "_") for name in rois_names]
     anova_pvalues = np.zeros((n_models, n_validation, n_scores, n_rois))
@@ -693,87 +693,98 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_subjects=301,
     checkpoints_dir = os.path.join(expdir, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
         flags_file, checkpoints_dir)
-    model = experiment.models
-    if type(model) is list:
-        for m in model:
-            print(model)
-    else:
-        print(model)
+
+    n_models = flags.num_models
     clinical_names = np.load(
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
     rois_names = np.load(
         os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
     modalities = ["clinical", "rois"]
     print_text(f"modalities: {modalities}")
-    trainset = experiment.dataset_train
-    print_text(f"train data: {len(trainset)}")
-    testset = experiment.dataset_test
-    print_text(f"test data: {len(testset)}")
-
-    print_subtitle("Compute blocks correlations using Kendall tau statstic...")
     cov_names = ["age", "sex", "site"]
     if dataset == "euaims":
         cov_names.append("fsiq")
     categorical_covs = ["sex", "site"]
     latent_names = ["joint", "clinical_rois", "clinical_style", "rois_style"]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-    model.eval()
-    kendalltaus = np.zeros((len(latent_names), n_validation, len(clinical_names) + len(cov_names), 2))
+    kendalltaus = np.zeros((n_models, len(latent_names), n_validation, len(clinical_names) + len(cov_names), 2))
     latent_disimilarities, scores_disimilarities = [], []
-    for val_idx in tqdm(range(n_validation)):
-        testloader = DataLoader(
-            testset, batch_size=n_subjects, shuffle=True, num_workers=0)
-        data = {}
-        dataiter = iter(testloader)
-        while True:
-            data, _, metadata = next(dataiter)
-            if all([mod in data.keys() for mod in modalities]):
-                break
-        for idx, mod in enumerate(modalities):
-            data[mod] = Variable(data[mod]).to(device).float()
-        for column in metadata.keys():
-            if type(metadata[column]) is list:
-                metadata[column] = np.array(metadata[column])
-            else:
-                metadata[column] = metadata[column].cpu().detach().numpy()
-        test_size = len(data[mod])
-        for latent_idx, latent_name in enumerate(latent_names):
-            latents = model(data, sample_latents=sample_latents)["latents"]
-            if latent_name == "joint":
-                latents = latents["joint"]
-            elif "style" in latent_name:
-                latents = latents["modalities"][latent_name]
-            else:
-                latents = latents["subsets"][latent_name]
-            if sample_latents:
-                latents = model.reparameterize(latents[0], latents[1])
-            else:
-                latents = latents[0]
-            latents = latents.cpu().detach().numpy()
-            print_text(f"latents: {latents.shape}")
-            n_scores = data["clinical"].shape[1]
-            n_subjects = len(latents)
-            cmat = data2cmat(latents)
-            latent_disimilarities.append(cmat)
-            print_text(f"(dis)similarity matrix: {cmat.shape}")
-            scores_cmats = []
-            for score_idx in range(n_scores):
-                score_cmat = vec2cmat(data["clinical"][:, score_idx])
-                scores_cmats.append(score_cmat)
-                tau, pval = fit_rsa(cmat, score_cmat)
-                kendalltaus[latent_idx, val_idx, score_idx, 0] = tau
-                kendalltaus[latent_idx, val_idx, score_idx, 1] = pval
-            for cov_idx, name in enumerate(cov_names):
-                score_cmat = vec2cmat(
-                    metadata[name], categorical=name in categorical_covs)
-                scores_cmats.append(score_cmat)
-                tau, pval = fit_rsa(cmat, score_cmat)
-                kendalltaus[latent_idx, val_idx, n_scores + cov_idx, 0] = tau
-                kendalltaus[latent_idx, val_idx, n_scores + cov_idx, 1] = pval
-        scores_cmats = np.asarray(scores_cmats)
-        scores_disimilarities.append(scores_cmats)
-        print_text(f"scores (dis)similarity matricies: {scores_cmats.shape}")
+    for model_idx in range(n_models):
+        trainset = experiment.dataset_train
+        testset = experiment.dataset_test
+        model = experiment.models
+        if n_models > 1:
+            trainset = trainset[model_idx]
+            testset = testset[model_idx]
+            model = model[model_idx]
+        print_text(f"train data: {len(trainset)}")
+        print_text(f"test data: {len(testset)}")
+
+        print_subtitle("Compute blocks correlations using Kendall tau statstic...")
+        cov_names = ["age", "sex", "site"]
+        if dataset == "euaims":
+            cov_names.append("fsiq")
+        categorical_covs = ["sex", "site"]
+        latent_names = ["joint", "clinical_rois", "clinical_style", "rois_style"]
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
+        model.eval()
+        latent_disimilarities.append([])
+        scores_disimilarities.append([])
+        for val_idx in tqdm(range(n_validation)):
+            testloader = DataLoader(
+                testset, batch_size=n_subjects, shuffle=True, num_workers=0)
+            data = {}
+            dataiter = iter(testloader)
+            while True:
+                data, _, metadata = next(dataiter)
+                if all([mod in data.keys() for mod in modalities]):
+                    break
+            for idx, mod in enumerate(modalities):
+                data[mod] = Variable(data[mod]).to(device).float()
+            for column in metadata.keys():
+                if type(metadata[column]) is list:
+                    metadata[column] = np.array(metadata[column])
+                else:
+                    metadata[column] = metadata[column].cpu().detach().numpy()
+            test_size = len(data[mod])
+            for latent_idx, latent_name in enumerate(latent_names):
+                latents = model(data, sample_latents=sample_latents)["latents"]
+                if latent_name == "joint":
+                    latents = latents["joint"]
+                elif "style" in latent_name:
+                    latents = latents["modalities"][latent_name]
+                else:
+                    latents = latents["subsets"][latent_name]
+                if sample_latents:
+                    latents = model.reparameterize(latents[0], latents[1])
+                else:
+                    latents = latents[0]
+                if latents is not None:
+                    latents = latents.cpu().detach().numpy()
+                    print_text(f"latents: {latents.shape}")
+                    n_scores = data["clinical"].shape[1]
+                    n_subjects = len(latents)
+                    cmat = data2cmat(latents)
+                    latent_disimilarities[model_idx].append(cmat)
+                    print_text(f"(dis)similarity matrix: {cmat.shape}")
+                    scores_cmats = []
+                    for score_idx in range(n_scores):
+                        score_cmat = vec2cmat(data["clinical"][:, score_idx])
+                        scores_cmats.append(score_cmat)
+                        tau, pval = fit_rsa(cmat, score_cmat)
+                        kendalltaus[model_idx, latent_idx, val_idx, score_idx, 0] = tau
+                        kendalltaus[model_idx, latent_idx, val_idx, score_idx, 1] = pval
+                    for cov_idx, name in enumerate(cov_names):
+                        score_cmat = vec2cmat(
+                            metadata[name], categorical=name in categorical_covs)
+                        scores_cmats.append(score_cmat)
+                        tau, pval = fit_rsa(cmat, score_cmat)
+                        kendalltaus[model_idx, latent_idx, val_idx, n_scores + cov_idx, 0] = tau
+                        kendalltaus[model_idx, latent_idx, val_idx, n_scores + cov_idx, 1] = pval
+                scores_cmats = np.asarray(scores_cmats)
+                scores_disimilarities[model_idx].append(scores_cmats)
+                print_text(f"scores (dis)similarity matricies: {scores_cmats.shape}")
     latent_disimilarities = np.asarray(latent_disimilarities)
     print_text(f"latent disimilarities: {latent_disimilarities.shape}")
     scores_disimilarities = np.asarray(scores_disimilarities)
@@ -793,16 +804,16 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_subjects=301,
         data = {"score": [], "pval": [], "pval_std": [], "r": [], "r_std": []}
         for score_idx in range(n_scores):
             data["score"].append(clinical_names[score_idx])
-            data["pval"].append(np.mean(kendalltaus[latent_idx, :, score_idx, 1]))
-            data["pval_std"].append(np.std(kendalltaus[latent_idx, :, score_idx, 1]))
-            data["r"].append(np.mean(kendalltaus[latent_idx, :, score_idx, 0]))
-            data["r_std"].append(np.std(kendalltaus[latent_idx, :, score_idx, 0]))
+            data["pval"].append(np.mean(kendalltaus[:, latent_idx, :, score_idx, 1]))
+            data["pval_std"].append(np.std(kendalltaus[:, latent_idx, :, score_idx, 1]))
+            data["r"].append(np.mean(kendalltaus[:, latent_idx, :, score_idx, 0]))
+            data["r_std"].append(np.std(kendalltaus[:, latent_idx, :, score_idx, 0]))
         for cov_idx, cov_name in enumerate(cov_names):
             data["score"].append(cov_name)
-            data["pval"].append(np.mean(kendalltaus[latent_idx, :, n_scores + cov_idx, 1]))
-            data["pval_std"].append(np.std(kendalltaus[latent_idx, :, n_scores + cov_idx, 1]))
-            data["r"].append(np.mean(kendalltaus[latent_idx, :, n_scores + cov_idx, 0]))
-            data["r_std"].append(np.std(kendalltaus[latent_idx, :, n_scores + cov_idx, 0]))
+            data["pval"].append(np.mean(kendalltaus[:, latent_idx, :, n_scores + cov_idx, 1]))
+            data["pval_std"].append(np.std(kendalltaus[:, latent_idx, :, n_scores + cov_idx, 1]))
+            data["r"].append(np.mean(kendalltaus[:, latent_idx, :, n_scores + cov_idx, 0]))
+            data["r_std"].append(np.std(kendalltaus[:, latent_idx, :, n_scores + cov_idx, 0]))
         df = pd.DataFrame.from_dict(data)
         summary_file = os.path.join(rsadir, f"kendalltau_{latent_name}.tsv")
         df.to_csv(summary_file, sep="\t", index=False)
@@ -893,8 +904,8 @@ def rsa_plot_exp(dataset, datasetdir, outdir, run):
 
 
 def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
-                            n_rois=5, plot_radar=True, plot_rois=True,
-                            plot_associations=False, n_votes=5, rescaled=True):
+                            n_rois=5, plot_associations=False, vote_prop=1,
+                            rescaled=True):
     """ Display specified score histogram across different cohorts.
     Parameters
     ----------
@@ -956,7 +967,7 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
         val_axis = 0 if n_models == 1 else 1
         idx_sign = ((pvalues < significativity_thr).sum(axis=val_axis) >= local_trust_level)
         if n_models > 1:
-            idx_sign = idx_sign.sum(0) >= n_votes
+            idx_sign = idx_sign.sum(0) >= vote_prop * n_models
         data = {"metric": [], "roi": [], "score": []}
         for idx, score in enumerate(clinical_names):
             rois_idx = np.where(idx_sign[idx])
@@ -1112,7 +1123,7 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
 
 def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
                           trust_level=0.7, plot_rois=True, plot_weights=True,
-                          n_votes=5, rescaled=True):
+                          vote_prop=1, rescaled=True):
     """ Display specified score and metric associations
     Parameters
     ----------
@@ -1172,7 +1183,7 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
         val_axis = 0 if n_models == 1 else 1
         idx_sign = ((pvalues < significativity_thr).sum(axis=val_axis) >= local_trust_level)
         if n_models > 1:
-            idx_sign = idx_sign.sum(0) >= n_votes
+            idx_sign = idx_sign.sum(0) >= vote_prop * n_models
         data = {"metric": [], "roi": [], "score": []}
         for idx, _score in enumerate(clinical_names):
             rois_idx = np.where(idx_sign[idx])
