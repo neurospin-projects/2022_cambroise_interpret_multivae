@@ -145,6 +145,9 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         flags.div_weight for _ in range(flags.num_mods)])
     create_dir_structure(flags)
 
+    if not flags.factorized_representation:
+        flags.style_dim = [0] * len(flags.style_dim)
+
     mst = MultimodalExperiment(flags)
     mst.set_optimizers()
     run_epochs(mst)
