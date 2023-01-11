@@ -60,6 +60,8 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         input dimension for each modality.
     latent_dim: int, default 20
         dimension of common factor latent space.
+    style_dim: list of int, default [3, 20]
+        dimension of specific latent spaces.
     num_hidden_layers: int, default 1
         number of hidden laters in the model.
     allow_missing_blocks: bool, default False
@@ -72,7 +74,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         starting learning rate.
     batch_size: int, default 256
         batch size for training.
-    num_epochs: int, default 1  500
+    num_epochs: int, default 1500
         the number of epochs for training.
     eval_freq: int, default 25
         frequency of evaluation of latent representation of generative
@@ -92,8 +94,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
     print(input_dims)
     print(type(input_dims))
     print_title(f"TRAIN: {dataset}")
-    # Further analyses for more than 1 models are not yet working
-    # num_models = 1
+
     flags = SimpleNamespace(
         dataset=dataset, datasetdir=datasetdir, num_models=num_models,
         allow_missing_blocks=allow_missing_blocks, batch_size=batch_size,
@@ -198,15 +199,14 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling_strategy="likelihood",
     sampling_strategy: str, default likelihood
         way to sample realistic value for the variable to explain. Must be
         either "linear", "uniform", "gaussian" or "likelihood".
-    n_validation: int, default 50
+    n_validation: int, default 5
         the number of times we repeat the experiments.
     n_samples: int, default 200
         the number of samples per subject.
     n_subjects: int, default 50
         the number of subjects used in each validation step.
-    k: int, default 1000
-        estimate the distribution per clinical scores from k Normal
-        distributions.
+    M: int, default 1000
+        estimate the distribution per clinical scores from M reconstructions
     trust_level: float, default 0.75
         after thresholding the Bonferoni-corrected p-values at 0.05, apply
         a voting threshold at `trust_level * n_validation`.
@@ -248,15 +248,15 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling_strategy="likelihood",
 
     # Creating folders and path to content
     params = SimpleNamespace(
-            n_validation=n_validation, n_subjects=n_subjects, M=M,
-            n_samples=n_samples, reg_method=reg_method,
-            sampling=sampling_strategy, sample_latents=sample_latents,
-            seed=seed)
+        n_validation=n_validation, n_subjects=n_subjects, M=M,
+        n_samples=n_samples, reg_method=reg_method,
+        sampling=sampling_strategy, sample_latents=sample_latents,
+        seed=seed)
     if seed is not None:
         np.random.seed(seed)
         torch.manual_seed(seed)
     name = "_".join(["_".join([key, str(val)])
-                    for key, val in params.__dict__.items()])
+                     for key, val in params.__dict__.items()])
     resdir = os.path.join(daadir, name)
     if not os.path.isdir(resdir):
         os.mkdir(resdir)
@@ -265,7 +265,6 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling_strategy="likelihood",
     sampled_scores_file = os.path.join(resdir, "sampled_scores.npy")
     metadata_file = os.path.join(resdir, "metadatas.npy")
     rois_reconstructions_file = os.path.join(resdir, "rois_reconstructions.npy")
-    metadata_cols_file = os.path.join(resdir, "metadatas_columns.npy")
     coefs_file = os.path.join(resdir, "coefs.npy")
     pvals_file = os.path.join(resdir, "pvalues.npy")
     if reg_method == "hierarchical":
@@ -302,7 +301,7 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling_strategy="likelihood",
         else:
             trainloader = DataLoader(
                 trainset, shuffle=True, batch_size=len(trainset), num_workers=0)
-        
+
         print_text(f"test data: {len(testset)}")
         testloader = DataLoader(
             testset, shuffle=True, batch_size=len(testset), num_workers=0)
@@ -379,8 +378,7 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling_strategy="likelihood",
             test_size = len(data[mod])
             rois_avatars = np.zeros(
                 (test_size, n_scores, params.n_samples, n_rois))
-            
-            
+
             clinical_loc_hats = []
             clinical_scale_hats = []
             rois_loc_hats = []
@@ -414,7 +412,7 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling_strategy="likelihood",
                         "rois": data["rois"]}
                     reconstructions = model(
                         modified_data, sample_latents=sample_latents)["rec"]
-                    rois_hat = reconstructions["rois"].loc.detach()
+                    rois_hat = reconstructions["rois"].loc.cpu().detach()
                     rois_avatars[:, idx, sample_idx] = rois_hat.numpy()
             if sampling_strategy == "likelihood":
                 scores_values = np.swapaxes(
@@ -423,7 +421,7 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling_strategy="likelihood",
                 rois_digital_avatars[val_idx] = rois_avatars
             else:
                 rois_digital_avatars[model_idx, val_idx] = rois_avatars
-            sampled_scores.append(scores_values.detach().numpy())
+            sampled_scores.append(scores_values.cpu().detach().numpy())
         all_sampled_scores.append(sampled_scores)
         all_metadatas.append(metadatas)
         all_rois_reconstructions.append(rois_reconstructions)
@@ -434,14 +432,12 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling_strategy="likelihood",
     all_sampled_scores = np.asarray(all_sampled_scores)
     all_rois_reconstructions = np.asarray(all_rois_reconstructions)
     del rois_digital_avatars
-    # np.save(metadata_cols_file, metadata_columns)
     np.save(sampled_scores_file, all_sampled_scores)
     np.save(metadata_file, all_metadatas)
     np.save(rois_reconstructions_file, all_rois_reconstructions)
+    
     rois_digital_avatars = np.load(da_file, mmap_mode="r+")
-    # sampled_scores = np.load(sampled_scores_file)
     all_metadatas = np.load(metadata_file, allow_pickle=True)
-    # metadata_columns =  np.load(metadata_cols_file, allow_pickle=True)
     print_text(f"digital avatars rois: {rois_digital_avatars.shape}")
     print_text(f"sampled scores: {all_sampled_scores.shape}")
     print_text(f"metadata: {len(all_metadatas), all_metadatas[0].shape}")
@@ -938,7 +934,7 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
 
     flags_file = os.path.join(expdir, "flags.rar")
     if not os.path.isfile(flags_file):
-        raise ValueError("You need first to train the model.")    
+        raise ValueError("You need first to train the model.")
     checkpoints_dir = os.path.join(expdir, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
         flags_file, checkpoints_dir)
@@ -960,7 +956,7 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
             continue
         coefs = np.load(os.path.join(dirname, "coefs.npy"))
         pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
-        
+
         n_validation = int(
             dirname.split("n_validation_")[1].split("_n_s")[0])
         local_trust_level = n_validation * trust_level
@@ -1155,7 +1151,7 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
 
     flags_file = os.path.join(expdir, "flags.rar")
     if not os.path.isfile(flags_file):
-        raise ValueError("You need first to train the model.")    
+        raise ValueError("You need first to train the model.")
     checkpoints_dir = os.path.join(expdir, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
         flags_file, checkpoints_dir)
@@ -1170,7 +1166,6 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
     n_models = flags.num_models
     scalers = experiment.scalers
 
-    print(significativity_thr)
     for dirname in simdirs:
         if not os.path.exists(os.path.join(dirname, "coefs.npy")):
             continue
