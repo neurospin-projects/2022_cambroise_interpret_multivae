@@ -108,7 +108,7 @@ def assess_robustness(dataset, datasetdir, outdir, run, n_validation=5,
                      n_samples=200, n_subjects=50,
                      M=1000, reg_method="hierarchical",
                      sampling_strategy="likelihood", sample_latents=True,
-                     seed=1037):
+                     seed=1037, n_models_to_plot=5):
     
     clinical_file = os.path.join(datasetdir, "clinical_names.npy")
     rois_file = os.path.join(datasetdir, "rois_names.npy")
@@ -134,7 +134,7 @@ def assess_robustness(dataset, datasetdir, outdir, run, n_validation=5,
 
     if flags.num_models == 1:
         pvalues = pvalues[np.newaxis]
-    for model_idx in range(flags.num_models):
+    for model_idx in range(flags.num_models)[:n_models_to_plot]:
         trust_levels = np.arange(0, 1.01, 0.05)
         assoc_counts = {"score": [], "metric": [], "trust_level": [], "num_assoc":[]}
         for trust_level in trust_levels:
@@ -169,16 +169,19 @@ def assess_robustness(dataset, datasetdir, outdir, run, n_validation=5,
                         counts["num_assoc"].values,
                         label=metric)
             ax.set_title(score)
+            if score_idx == len(clinical_names) - 1:
+                ax.legend()
         fig.tight_layout()
     
-    for n_votes in range(flags.num_models):
+    for vote_prop in np.linspace(0.5, 1, min(n_models_to_plot, flags.num_models)):#range(flags.num_models)[:n_models_to_plot]:
         trust_levels = np.arange(0, 1.01, 0.05)
         assoc_counts = {"score": [], "metric": [], "trust_level": [], "num_assoc":[]}
         for trust_level in trust_levels:
             local_trust_level = params.n_validation * trust_level
-            idx_sign = (
+            idx_sign = ((
                 (pvalues < significativity_thr).sum(
-                    axis=1) >= local_trust_level).sum(0) > n_votes
+                    axis=1) >= local_trust_level).sum(0) >= 
+                        vote_prop * flags.num_models)
 
             data = {"metric": [], "roi": [], "score": []}
             for idx, score in enumerate(clinical_names):
@@ -206,6 +209,8 @@ def assess_robustness(dataset, datasetdir, outdir, run, n_validation=5,
                         counts["num_assoc"].values,
                         label=metric)
             ax.set_title(score)
+            if score_idx == len(clinical_names) - 1:
+                ax.legend()
         fig.tight_layout()
     plt.show()
 
