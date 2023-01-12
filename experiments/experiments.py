@@ -27,7 +27,7 @@ fire.Fire({
     "rsa": wf.rsa_exp,
     "rsa-plot": wf.rsa_plot_exp,
     "hist-plot": wf.hist_plot_exp,
-    "avatar-plot": wf.avatar_plot_exp,
+    # "avatar-plot": wf.avatar_plot_exp,
     "daa-analysis": analyze_avatars,
     "daa-robustness": assess_robustness,
     "univariate-tests": univariate_tests
