@@ -70,6 +70,10 @@ class MultimodalExperiment(BaseExperiment):
         #     continuous=["age"],
         #     categorical=["sex", "site"]
         # )
+        if "data_seed" not in vars(self.flags):
+            self.flags.data_seed = "defaults"
+        if "grad_scaling" not in vars(self.flags):
+            self.flags.grad_scaling = False
         self.modalities, self.mod_names = self.set_modalities()
         self.subsets = self.set_subsets()
         self.dataset_train = None
@@ -89,6 +93,10 @@ class MultimodalExperiment(BaseExperiment):
     @classmethod
     def get_experiment(cls, flags_file, checkpoints_dir, load_epoch=None):
         flags = torch.load(flags_file)
+        if not "num_models" in vars(flags):
+            flags.num_models = 1
+        use_cuda = torch.cuda.is_available()
+        flags.device = torch.device("cuda" if use_cuda else "cpu")
         experiment = MultimodalExperiment(flags)
         for model_idx in range(flags.num_models):
             model = experiment.models
@@ -108,7 +116,7 @@ class MultimodalExperiment(BaseExperiment):
                 cp_epochs = np.array([int(path.split(os.sep)[-2]) for path in cp_files])
                 cp_file = cp_files[np.argmin(cp_epochs >= load_epoch)]
             print(cp_file)
-            model.load_state_dict(torch.load(cp_file))
+            model.load_state_dict(torch.load(cp_file, map_location=flags.device))
 
         return experiment, flags
 
@@ -200,7 +208,8 @@ class MultimodalExperiment(BaseExperiment):
         manager = DataManager(self.flags.dataset, self.flags.datasetdir,
                                 list(self.modalities), overwrite=True,
                                 allow_missing_blocks=self.flags.allow_missing_blocks,
-                                validation=validation, test_size=test_size)
+                                validation=validation, test_size=test_size,
+                                seed=self.flags.data_seed)
         for model_idx in range(n_models):
             train_dataset = manager.train_dataset
             train_idx = None
@@ -248,6 +257,7 @@ class MultimodalExperiment(BaseExperiment):
         # optimizer definition
         total_params = 0
         optimizers = []
+        grad_scalers = []
         for model_idx in range(self.flags.num_models):
             model = self.models
             if self.flags.num_models > 1:
@@ -260,9 +270,12 @@ class MultimodalExperiment(BaseExperiment):
                                 betas=(self.flags.beta_1,
                                 self.flags.beta_2))
             optimizers.append(optimizer)
+            grad_scalers.append(torch.cuda.amp.GradScaler())
         if self.flags.num_models == 1:
             optimizers = optimizers[0]
+            grad_scalers = grad_scalers[0]
         self.optimizers = optimizers
+        self.grad_scalers = grad_scalers
         print('num parameters: ' + str(total_params))
 
     def set_rec_weights(self):

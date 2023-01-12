@@ -47,6 +47,8 @@ def get_color_list(color_name, n_colors=None):
 def plt_to_plotly_rgb(color):
     """ Converts a rgb color to plotly color format if necessary
     """
+    if type(color) is str and color.startswith("#"):
+        return color
     color = tuple(int(c) if c > 1 and i <= 3 else int(c * 256) if i <= 3 else c for i, c in enumerate(color))
     if len(color) < 4:
         color = tuple((*color, 1))

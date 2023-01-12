@@ -39,13 +39,14 @@ from color_utils import (
 
 
 def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
-              latent_dim=20, style_dim=[3, 20],
+              latent_dim=20, style_dim=[3, 20], data_seed="defaults",
               num_hidden_layer_encoder=1, num_hidden_layer_decoder=0,
-              allow_missing_blocks=True, factorized_representation=True, beta=1., 
-              likelihood="normal", initial_learning_rate=0.002, batch_size=256,
-              n_epochs=1500, eval_freq=25, eval_freq_fid=100,
+              allow_missing_blocks=True, factorized_representation=True,
+              likelihood="normal", learning_rate=0.002, batch_size=256,
+              num_epochs=1500, eval_freq=25, eval_freq_fid=100, beta=1.,
               data_multiplications=1, dropout_rate=0., initial_out_logvar=-3.,
-              learn_output_scale=True, out_scale_per_subject=False):
+              learn_output_scale=True, out_scale_per_subject=False,
+              method="joint_elbo", grad_scaling=False):
     """ Train the model.
     Parameters
     ----------
@@ -59,6 +60,8 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         input dimension for each modality.
     latent_dim: int, default 20
         dimension of common factor latent space.
+    style_dim: list of int, default [3, 20]
+        dimension of specific latent spaces.
     num_hidden_layers: int, default 1
         number of hidden laters in the model.
     allow_missing_blocks: bool, default False
@@ -71,7 +74,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         starting learning rate.
     batch_size: int, default 256
         batch size for training.
-    n_epochs: int, default 2500
+    num_epochs: int, default 1500
         the number of epochs for training.
     eval_freq: int, default 25
         frequency of evaluation of latent representation of generative
@@ -91,8 +94,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
     print(input_dims)
     print(type(input_dims))
     print_title(f"TRAIN: {dataset}")
-    # Further analyses for more than 1 models are not yet working
-    num_models = 1
+
     flags = SimpleNamespace(
         dataset=dataset, datasetdir=datasetdir, num_models=num_models,
         allow_missing_blocks=allow_missing_blocks, batch_size=batch_size,
@@ -101,14 +103,14 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         class_dim=latent_dim, data_multiplications=data_multiplications,
         dim=64, dir_data="../data", dir_experiment=outdir, dir_fid=None,
         div_weight=None, div_weight_uniform_content=None,
-        end_epoch=n_epochs, eval_freq=eval_freq, eval_freq_fid=eval_freq_fid,
+        end_epoch=num_epochs, eval_freq=eval_freq, eval_freq_fid=eval_freq_fid,
         factorized_representation=factorized_representation, img_size_m1=28, img_size_m2=32,
         inception_state_dict="../inception_state_dict.pth",
-        initial_learning_rate=initial_learning_rate,
+        initial_learning_rate=learning_rate,
         initial_out_logvar=initial_out_logvar, input_dim=input_dims,
         joint_elbo=False, kl_annealing=0, include_prior_expert=False,
         learn_output_scale=learn_output_scale, learn_output_sample_scale=out_scale_per_subject,
-        len_sequence=8, likelihood=likelihood, load_saved=False, method='joint_elbo',
+        len_sequence=8, likelihood=likelihood, load_saved=False, method=method,
         model_save="model", modality_jsd=False, modality_moe=False,
         modality_poe=False, num_channels_m1=1, num_channels_m2=3,
         num_classes=2, num_hidden_layer_encoder=num_hidden_layer_encoder,
@@ -116,7 +118,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         dropout_rate=dropout_rate,
         num_samples_fid=10000, num_training_samples_lr=500,
         poe_unimodal_elbos=True, save_figure=False, start_epoch=0, style_dim=style_dim,
-        subsampled_reconstruction=True)
+        subsampled_reconstruction=True, data_seed=data_seed, grad_scaling=grad_scaling)
     print(flags)
     use_cuda = torch.cuda.is_available()
     flags.device = torch.device("cuda" if use_cuda else "cpu")
@@ -142,6 +144,9 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
     flags.alpha_modalities.extend([
         flags.div_weight for _ in range(flags.num_mods)])
     create_dir_structure(flags)
+
+    if not flags.factorized_representation:
+        flags.style_dim = [0] * len(flags.style_dim)
 
     mst = MultimodalExperiment(flags)
     mst.set_optimizers()
@@ -177,9 +182,10 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
     runs.to_csv(os.path.join(flags.dir_experiment, "runs.tsv"), index=False, sep="\t")
 
 
-def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
-            n_validation=5, n_discretization_steps=200, n_samples=50,
-            M=1000, trust_level=0.75, seed=1037, reg_method="hierarchical"):
+def daa_exp(dataset, datasetdir, outdir, run, sampling_strategy="likelihood",
+            n_validation=5, n_samples=200, n_subjects=50,
+            M=1000, trust_level=0.75, seed=1037, reg_method="hierarchical",
+            sample_latents=True, vote_prop=1):
     """ Perform the digital avatars analysis using clinical scores taverses
     to influence the imaging part.
     Parameters
@@ -193,20 +199,17 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
     run: str
         the name of the experiment in the destination folder:
         `<dataset>_<timestamp>'.
-    linear_gradient: bool, default False
-        optionally build the traverses min/max bound for each clinical score
-        from K samples in the latent space, otherwise define these bounds from
-        the clinical table itself.
-    n_validation: int, default 50
+    sampling_strategy: str, default likelihood
+        way to sample realistic value for the variable to explain. Must be
+        either "linear", "uniform", "gaussian" or "likelihood".
+    n_validation: int, default 5
         the number of times we repeat the experiments.
-    n_discretization_steps: int, default 200
-        the size of each traverse.
-    n_samples: int, default 50
-        the number of perturbed samples for each clinical score (keep only
-        subjects with no missing data).
-    k: int, default 1000
-        estimate the distribution per clinical scores from k Normal
-        distributions.
+    n_samples: int, default 200
+        the number of samples per subject.
+    n_subjects: int, default 50
+        the number of subjects used in each validation step.
+    M: int, default 1000
+        estimate the distribution per clinical scores from M reconstructions
     trust_level: float, default 0.75
         after thresholding the Bonferoni-corrected p-values at 0.05, apply
         a voting threshold at `trust_level * n_validation`.
@@ -214,6 +217,10 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
         optionally specify a seed to control expriment reproducibility, set
         to None for randomization.
     """
+    if sampling_strategy not in ["linear", "uniform", "gaussian", "likelihood"]:
+        raise ValueError("sampling_strategy must be either linear, uniform"
+                         "gaussian or likelihood")
+
     print_title(f"DIGITAL AVATARS ANALYSIS: {dataset}")
     expdir = os.path.join(outdir, run)
     daadir = os.path.join(expdir, "daa")
@@ -229,73 +236,25 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
     checkpoints_dir = os.path.join(expdir, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
         flags_file, checkpoints_dir)
-    model = experiment.models
-    if type(model) is list:
-        for m in model:
-            print(model)
-    else:
-        print(model)
+    n_models = experiment.flags.num_models
+
     clinical_names = np.load(
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
     rois_names = np.load(
         os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
     modalities = ["clinical", "rois"]
     print_text(f"modalities: {modalities}")
-    trainset = experiment.dataset_train
-    print_text(f"train data: {len(trainset)}")
-    if flags.allow_missing_blocks:
-        trainsampler = MissingModalitySampler(
-            trainset, batch_size=len(trainset))
-        trainloader = DataLoader(
-            trainset, batch_sampler=trainsampler, num_workers=0)
-    else:
-        trainloader = DataLoader(
-            trainset, shuffle=True, batch_size=len(trainset), num_workers=0)
-    testset = experiment.dataset_test
-    print_text(f"test data: {len(testset)}")
-    if flags.allow_missing_blocks:
-        testsampler = MissingModalitySampler(testset, batch_size=len(testset))
-        testloader = DataLoader(
-            testset, batch_sampler=testsampler, num_workers=0)
-    else:
-        testloader = DataLoader(
-            testset, shuffle=True, batch_size=len(testset), num_workers=0)
 
-    print_subtitle("Evaluate model...")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-    model.eval()
-    _data = {}
-    with torch.set_grad_enabled(False):
-        for phase, loader in zip(("train", "test"), (trainloader, testloader)):
-            dataiter = iter(loader)
-            while True:
-                data, labels, _ = next(dataiter)
-                if all([mod in data.keys() for mod in modalities]):
-                    break
-            for idx, mod in enumerate(modalities):
-                data[mod] = Variable(data[mod]).to(device).float()
-            _data[f"z{phase}"] = model.inference(data)
-            _data[f"data{phase}"] = data
-    latents = SimpleNamespace(**_data)
-    print_text(f"z train: {latents.ztrain['mus'].shape}")
-    print_text(f"z test: {latents.ztest['mus'].shape}")
-    subsets = list(latents.ztest["subsets"])
-    print_text(f"subsets: {subsets}")
+    n_scores = len(clinical_names)
+    n_rois = len(rois_names)
 
-    print_subtitle("Create digital avatars models using artificial clinical scores...")
-    if linear_gradient:
-        print_text("Build the artificial values using traverses "
-                   "between min/max bounds for each clinical score "
-                   "from the true values.")
-    else:
-        print_text("Build the artificial values for each score by "
-                   "sampling in the estimated output distribution "
-                   "for each subject.")
+
+    # Creating folders and path to content
     params = SimpleNamespace(
-        n_validation=n_validation, n_samples=n_samples, M=M,
-        n_discretization_steps=n_discretization_steps,
-        reg_method=reg_method)
+        n_validation=n_validation, n_subjects=n_subjects, M=M,
+        n_samples=n_samples, reg_method=reg_method,
+        sampling=sampling_strategy, sample_latents=sample_latents,
+        seed=seed)
     if seed is not None:
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -308,36 +267,100 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
     da_file = os.path.join(resdir, "rois_digital_avatars.npy")
     sampled_scores_file = os.path.join(resdir, "sampled_scores.npy")
     metadata_file = os.path.join(resdir, "metadatas.npy")
-    metadata_cols_file = os.path.join(resdir, "metadatas_columns.npy")
+    rois_reconstructions_file = os.path.join(resdir, "rois_reconstructions.npy")
     coefs_file = os.path.join(resdir, "coefs.npy")
     pvals_file = os.path.join(resdir, "pvalues.npy")
     if reg_method == "hierarchical":
         all_coefs = []
         all_coefs_file = os.path.join(resdir, "all_coefs.npy")
-
-    trainset = latents.datatrain
-    clinical_values = trainset["clinical"].cpu().detach().numpy()
-    n_scores = clinical_values.shape[1]
-    print_text(f"number of scores: {n_scores}")
-    rois_values = trainset["rois"].cpu().detach().numpy()
-    n_rois = rois_values.shape[1]
-    min_per_score, max_per_score = np.quantile(
-        clinical_values, [0.05, 0.95], 0)
-    print_text(f"min range per score: {min_per_score}")
-    print_text(f"max range per score: {max_per_score}")
-    traverses = torch.FloatTensor(np.linspace(
-        min_per_score, max_per_score, params.n_discretization_steps))
+    
     print_text(f"number of ROIs: {n_rois}")
-    sampled_scores, metadatas = [], []
+    print_text(f"number of clinical scores: {n_scores}")
+    all_sampled_scores, all_metadatas, all_rois_reconstructions = [], [], []
+    shape=(n_models, params.n_validation,
+           params.n_subjects, n_scores, params.n_samples,
+           n_rois)
+    if n_models == 1:
+        shape=(params.n_validation, params.n_subjects,
+               n_scores, params.n_samples, n_rois)
     rois_digital_avatars = open_memmap(
         da_file, dtype='float32', mode='w+',
-        shape=(params.n_validation, params.n_samples,
-               n_scores, params.n_discretization_steps,
-               n_rois))
-    if not os.path.isfile(pvals_file):
+        shape=shape)
+
+    for model_idx in range(n_models):
+        trainset = experiment.dataset_train
+        testset = experiment.dataset_test
+        model = experiment.models
+        if n_models > 1:
+            trainset = trainset[model_idx]
+            testset = testset[model_idx]
+            model = model[model_idx]
+        print_text(f"train data: {len(trainset)}")
+        if flags.allow_missing_blocks:
+            trainsampler = MissingModalitySampler(
+                trainset, batch_size=len(trainset))
+            trainloader = DataLoader(
+                trainset, batch_sampler=trainsampler, num_workers=0)
+        else:
+            trainloader = DataLoader(
+                trainset, shuffle=True, batch_size=len(trainset), num_workers=0)
+
+        print_text(f"test data: {len(testset)}")
+        testloader = DataLoader(
+            testset, shuffle=True, batch_size=len(testset), num_workers=0)
+
+        print_subtitle("Evaluate model...")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
+        model.eval()
+        _data = {}
+        with torch.set_grad_enabled(False):
+            for phase, loader in zip(("train", "test"), (trainloader, testloader)):
+                dataiter = iter(loader)
+                while True:
+                    data, labels, _ = next(dataiter)
+                    if all([mod in data.keys() for mod in modalities]):
+                        break
+                for idx, mod in enumerate(modalities):
+                    data[mod] = Variable(data[mod]).to(device).float()
+                _data[f"z{phase}"] = model.inference(data)
+                _data[f"data{phase}"] = data
+        latents = SimpleNamespace(**_data)
+        print_text(f"z train: {latents.ztrain['mus'].shape}")
+        print_text(f"z test: {latents.ztest['mus'].shape}")
+        subsets = list(latents.ztest["subsets"])
+        print_text(f"subsets: {subsets}")
+        trainset = latents.datatrain
+        clinical_values = trainset["clinical"].cpu().detach().numpy()
+
+        print_subtitle("Create digital avatars models using artificial clinical scores...")
+        if sampling_strategy != "likelihood":
+            print_text("Build the artificial values using population level statistics")
+            min_per_score, max_per_score = np.quantile(
+                clinical_values, [0.05, 0.95], 0)
+            print_text(f"min range per score: {min_per_score}")
+            print_text(f"max range per score: {max_per_score}")
+            if sampling_strategy == "linear":
+                scores_values = torch.FloatTensor(np.repeat(
+                    np.linspace(min_per_score, max_per_score,
+                        params.n_samples)[np.newaxis, :], n_subjects, axis=0))
+            elif sampling_strategy == "uniform":
+                scores_values = torch.FloatTensor(np.random.uniform(
+                    min_per_score, max_per_score,
+                    size=(n_subjects, len(clinical_names), params.n_samples)))
+            else:
+                scores_values = torch.FloatTensor(np.random.normal(
+                    0, 1,
+                    size=(n_subjects, len(clinical_names), params.n_samples)))
+        else:
+            print_text("Build the artificial values for each score by "
+                    "sampling in the estimated output distribution "
+                    "for each subject.")
+
+        sampled_scores, metadatas, rois_reconstructions = [], [], []
         for val_idx in tqdm(range(params.n_validation)):
             testloader = DataLoader(
-                testset, batch_size=params.n_samples, shuffle=True,
+                testset, batch_size=params.n_subjects, shuffle=True,
                 num_workers=0)
             data = {}
             dataiter = iter(testloader)
@@ -357,105 +380,137 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
             metadatas.append(metadata_df.to_numpy())
             test_size = len(data[mod])
             rois_avatars = np.zeros(
-                (test_size, n_scores, params.n_discretization_steps, n_rois))
-            scores_values = np.zeros(
-                (test_size, n_scores, params.n_discretization_steps))
-            if not linear_gradient:
-                clinical_loc_hats = []
-                clinical_scale_hats = []
-                for _ in range(params.M):
-                    reconstructions = model(data, sample_latents=True)["rec"]
-                    clinical_loc_hats.append(
-                        reconstructions["clinical"].loc.unsqueeze(0))
-                    clinical_scale_hats.append(
-                        reconstructions["clinical"].scale.unsqueeze(0))
-                clinical_loc_hat = torch.cat(clinical_loc_hats).mean(0)
-                clinical_scale_hat = torch.cat(clinical_scale_hats).mean(0)
+                (test_size, n_scores, params.n_samples, n_rois))
+
+            clinical_loc_hats = []
+            clinical_scale_hats = []
+            rois_loc_hats = []
+            for _ in range(params.M):
+                reconstructions = model(data, sample_latents=True)["rec"]
+                clinical_loc_hats.append(
+                    reconstructions["clinical"].loc.unsqueeze(0))
+                clinical_scale_hats.append(
+                    reconstructions["clinical"].scale.unsqueeze(0))
+                rois_loc_hats.append(
+                    reconstructions["rois"].loc.unsqueeze(0))
+            clinical_loc_hat = torch.cat(clinical_loc_hats).mean(0)
+            clinical_scale_hat = torch.cat(clinical_scale_hats).mean(0)
+            rois_reconstruction = torch.cat(rois_loc_hats).mean(0)
+            rois_reconstructions.append(
+                rois_reconstruction.cpu().detach().numpy())
+            if sampling_strategy == "likelihood":
                 dist = torch.distributions.Normal(
                     clinical_loc_hat, clinical_scale_hat)
                 scores_values = dist.sample(
-                    torch.Size([params.n_discretization_steps]))
-            for step in range(params.n_discretization_steps):
+                    torch.Size([params.n_samples]))
+            for sample_idx in range(params.n_samples):
                 for idx, qname in enumerate(clinical_names):
                     cdata = data["clinical"].clone()
-                    if linear_gradient:
-                        cdata[:, idx] = traverses[step, idx]
-                        scores_values[:, idx, step] = traverses[step, idx]
+                    if sampling_strategy == "likelihood":
+                        cdata[:, idx] = scores_values[sample_idx, :, idx]
                     else:
-                        cdata[:, idx] = scores_values[step, :, idx]
+                        cdata[:, idx] = scores_values[:, sample_idx, idx]
                     modified_data = {
                         "clinical": cdata,
                         "rois": data["rois"]}
                     reconstructions = model(
-                        modified_data, sample_latents=True)["rec"]
-                    rois_hat = reconstructions["rois"].loc.detach()
-                    rois_avatars[:, idx, step] = rois_hat.numpy()
-            if linear_gradient:
-                scores_values = np.swapaxes(scores_values, 1, 2)
-            else:
+                        modified_data, sample_latents=sample_latents)["rec"]
+                    rois_hat = reconstructions["rois"].loc.cpu().detach()
+                    rois_avatars[:, idx, sample_idx] = rois_hat.numpy()
+            if sampling_strategy == "likelihood":
                 scores_values = np.swapaxes(
-                    scores_values.detach().numpy(), 0, 1)
-            rois_digital_avatars[val_idx] = rois_avatars
-            sampled_scores.append(scores_values)
-        sampled_scores = np.asarray(sampled_scores)
-        del rois_digital_avatars
-        np.save(metadata_cols_file,metadata_columns)
-        np.save(sampled_scores_file, sampled_scores)
-        np.save(metadata_file, metadatas)
+                    scores_values, 0, 1)
+            if n_models == 1:
+                rois_digital_avatars[val_idx] = rois_avatars
+            else:
+                rois_digital_avatars[model_idx, val_idx] = rois_avatars
+            sampled_scores.append(scores_values.cpu().detach().numpy())
+        all_sampled_scores.append(sampled_scores)
+        all_metadatas.append(metadatas)
+        all_rois_reconstructions.append(rois_reconstructions)
+    if n_models == 1:
+        all_sampled_scores = all_sampled_scores[0]
+        all_metadatas = all_metadatas[0]
+        all_rois_reconstructions = all_rois_reconstructions[0]
+    all_sampled_scores = np.asarray(all_sampled_scores)
+    all_rois_reconstructions = np.asarray(all_rois_reconstructions)
+    del rois_digital_avatars
+    np.save(sampled_scores_file, all_sampled_scores)
+    np.save(metadata_file, all_metadatas)
+    np.save(rois_reconstructions_file, all_rois_reconstructions)
+    
     rois_digital_avatars = np.load(da_file, mmap_mode="r+")
-    sampled_scores = np.load(sampled_scores_file)
-    metadatas = np.load(metadata_file, allow_pickle=True)
-    metadata_columns =  np.load(metadata_cols_file, allow_pickle=True)
+    all_metadatas = np.load(metadata_file, allow_pickle=True)
     print_text(f"digital avatars rois: {rois_digital_avatars.shape}")
-    print_text(f"sampled scores: {sampled_scores.shape}")
-    print_text(f"metadata: {len(metadatas), metadatas[0].shape}")
+    print_text(f"sampled scores: {all_sampled_scores.shape}")
+    print_text(f"metadata: {len(all_metadatas), all_metadatas[0].shape}")
     
     print_subtitle("Compute statistics (regression): digital avatar wrt "
                    "sampled scores...")
-    if not os.path.isfile(pvals_file):
-        participant_id_idx = metadata_columns.tolist().index("participant_id")
-        site_idx = metadata_columns.tolist().index("site")
-        coefs = np.zeros((params.n_validation, n_scores, n_rois))
-        pvalues = np.zeros((params.n_validation, n_scores, n_rois))
+    participant_id_idx = metadata_columns.index("participant_id")
+    site_idx = metadata_columns.index("site")
+    coefs = np.zeros((n_models, params.n_validation, n_scores, n_rois))
+    pvalues = np.zeros((n_models, params.n_validation, n_scores, n_rois))
+    for model_idx in range(n_models):
+        if reg_method == "hierarchical":
+            all_coefs.append([])
+        rois_da = rois_digital_avatars
+        sampled_scores = all_sampled_scores
+        metadatas = all_metadatas
+        rois_reconstructions = all_rois_reconstructions
+        if n_models > 1:
+            rois_da = rois_digital_avatars[model_idx]
+            sampled_scores = all_sampled_scores[model_idx]
+            metadatas = all_metadatas[model_idx]
+            rois_reconstructions = all_rois_reconstructions[model_idx]
         for val_idx in tqdm(range(params.n_validation)):
-            rois_avatars = rois_digital_avatars[val_idx]
+            rois_avatars = rois_da[val_idx]
             scores_values = sampled_scores[val_idx]
             metadata = metadatas[val_idx]
+            rois_reconstruction = rois_reconstructions[val_idx]
             if reg_method == "hierarchical":
-                all_coefs.append([])
+                all_coefs[model_idx].append([])
             for score_idx in range(n_scores):
                 base_df = pd.DataFrame(dict(
-                    participant_id=np.repeat(metadata[:, participant_id_idx, np.newaxis], n_discretization_steps, axis=1).flatten(),
+                    participant_id=np.repeat(metadata[:, participant_id_idx, np.newaxis], n_samples, axis=1).flatten(),
                     sampled_score=scores_values[:, :, score_idx].flatten()))
                 if reg_method == "hierarchical":
-                    all_coefs[val_idx].append(
-                        pd.DataFrame(metadata[:, [participant_id_idx, site_idx]],
-                                     columns=["participant_id", "site"]))
+                    local_metadata = pd.DataFrame(metadata[:, [participant_id_idx, site_idx]],
+                                        columns=["participant_id", "site"])
+                    all_coefs[model_idx][val_idx].append(local_metadata)
                 for roi_idx in range(n_rois):
                     df = base_df.copy()
                     df["roi_avatar"] = (
                         rois_avatars[:, score_idx, :, roi_idx].flatten())
+                    df["roi_reconstruction"] = np.repeat(
+                        rois_reconstruction[:, roi_idx, np.newaxis],
+                        n_samples,
+                        axis=1).flatten()
+                    y_name = "roi_avatar"
+                    if reg_method == "fixed":
+                        df["roi_avatar_diff"] = df["roi_avatar"] - df["roi_reconstruction"]
+                        y_name = "roi_avatar_diff"
                     
-                    results = make_regression(df, "sampled_score", "roi_avatar",
-                                              groups_name="participant_id",
-                                              method=reg_method)
+                    results = make_regression(df, "sampled_score", y_name,
+                                                groups_name="participant_id",
+                                                method=reg_method,
+                                                other=rois_reconstruction[:, roi_idx])
                     new_pvals, new_coefs, all_betas = results
-                    pvalues[val_idx, score_idx, roi_idx] = new_pvals
-                    coefs[val_idx, score_idx, roi_idx] = new_coefs
+                    pvalues[model_idx, val_idx, score_idx, roi_idx] = new_pvals
+                    coefs[model_idx, val_idx, score_idx, roi_idx] = new_coefs
                     if reg_method == "hierarchical":
                         roi_name = rois_names[roi_idx].replace("&", "_").replace("-", "_")
                         all_betas.rename(columns={"beta": roi_name}, inplace=True)
-                        all_coefs[val_idx][score_idx] = all_coefs[val_idx][score_idx].join(
+                        all_coefs[model_idx][val_idx][score_idx] = all_coefs[model_idx][val_idx][score_idx].join(
                             all_betas.set_index("participant_id"), on="participant_id")
-        np.save(pvals_file, pvalues)
-        np.save(coefs_file, coefs)
-        if reg_method == "hierarchical":
-            np.save(all_coefs_file, all_coefs)
-    else:
-        print_text(f"restoring p-values: {pvals_file}")
-        pvalues = np.load(pvals_file)
-        print_text(f"restoring regressors: {coefs_file}")
-        coefs = np.load(coefs_file)
+    if n_models == 1:
+        pvalues = pvalues[0]
+        coefs = coefs[0]
+        all_coefs = all_coefs[0]
+    np.save(pvals_file, pvalues)
+    np.save(coefs_file, coefs)
+    if reg_method == "hierarchical":
+        np.save(all_coefs_file, all_coefs)
     print_text(f"p_values: {pvalues.shape}")
     print_text(f"regression coefficients: {coefs.shape}")
 
@@ -463,7 +518,12 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
     significativity_thr = (0.05 / n_rois / n_scores)
     trust_level = params.n_validation * trust_level
     print_text(f"voting trust level: {trust_level} / {params.n_validation}")
-    idx_sign = ((pvalues < significativity_thr).sum(axis=0) >= trust_level)
+
+    val_axis = 0 if n_models == 1 else 1
+    idx_sign = ((pvalues < significativity_thr).sum(axis=val_axis) >= trust_level)
+    if n_models > 1:
+        idx_sign = idx_sign.sum(0) >= vote_prop * n_models
+    print(idx_sign.shape)
     data = {"metric": [], "roi": [], "score": []}
     for idx, score in enumerate(clinical_names):
         rois_idx = np.where(idx_sign[idx])
@@ -480,8 +540,9 @@ def daa_exp(dataset, datasetdir, outdir, run, linear_gradient=False,
 
 
 def anova_exp(dataset, datasetdir, outdir, run, n_validation=5,
-              n_discretization_steps=200, n_samples=50,
-              M=1000, trust_level=0.75, seed=1037, reg_method="hierarchical"):
+              n_samples=200, n_subjects=50, sampling_strategy="likelihood",
+              M=1000, trust_level=0.75, seed=1037, reg_method="hierarchical",
+              sample_latents=True, vote_prop=1):
     """ Perform the anova analysis one the subjects coefficient to see if
     there is any site effect.
     Parameters
@@ -495,15 +556,14 @@ def anova_exp(dataset, datasetdir, outdir, run, n_validation=5,
     run: str
         the name of the experiment in the destination folder:
         `<dataset>_<timestamp>'.
-    linear_gradient: bool, default False
-        optionally build the traverses min/max bound for each clinical score
-        from K samples in the latent space, otherwise define these bounds from
-        the clinical table itself.
+    sampling_strategy: str, default likelihood
+        way to sample realistic value for the variable to explain. Must be
+        either "linear", "uniform", "gaussian" or "likelihood".
     n_validation: int, default 50
         the number of times we repeat the experiments.
-    n_discretization_steps: int, default 200
+    n_samples: int, default 200
         the size of each traverse.
-    n_samples: int, default 50
+    n_subjects: int, default 50
         the number of perturbed samples for each clinical score (keep only
         subjects with no missing data).
     k: int, default 1000
@@ -530,14 +590,16 @@ def anova_exp(dataset, datasetdir, outdir, run, n_validation=5,
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
     rois_names = np.load(
         os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
+    flags = torch.load(os.path.join(expdir, "flags.rar"))
+    n_models = flags.num_models
     n_scores = len(clinical_names)
     n_rois = len(rois_names)
-    modalities = ["clinical", "rois"]
     
     params = SimpleNamespace(
-        n_validation=n_validation, n_samples=n_samples, M=M,
-        n_discretization_steps=n_discretization_steps,
-        reg_method=reg_method)
+        n_validation=n_validation, n_subjects=n_subjects, M=M,
+        n_samples=n_samples, reg_method=reg_method,
+        sampling=sampling_strategy, sample_latents=sample_latents,
+        seed=seed)
     if seed is not None:
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -556,36 +618,42 @@ def anova_exp(dataset, datasetdir, outdir, run, n_validation=5,
     significativity_thr = (0.05 / n_rois / n_scores)
     trust_level = params.n_validation * trust_level
     print_text(f"voting trust level: {trust_level} / {params.n_validation}")
-    idx_sign = ((pvalues < significativity_thr).sum(axis=0) >= trust_level)
+    val_axis = 0 if n_models == 1 else 1
+    idx_sign = ((pvalues < significativity_thr).sum(axis=val_axis) >= trust_level)
+    if n_models > 1:
+        idx_sign = idx_sign.sum(0) >= vote_prop * n_models
     modified_rois_names = [
         name.replace("&", "_").replace("-", "_") for name in rois_names]
-    anova_pvalues = np.zeros((n_validation, n_scores, n_rois))
-    for val_idx in range(n_validation):
-        for score_idx, score in enumerate(clinical_names):
-            coefs = pd.DataFrame(
-                all_coefs[val_idx][score_idx],
-                columns=["participant_id", "site"] + modified_rois_names)
-            coefs[modified_rois_names] = coefs[modified_rois_names].astype(float)
+    anova_pvalues = np.zeros((n_models, n_validation, n_scores, n_rois))
+    if n_models == 1:
+        all_coefs = all_coefs[np.newaxis]
+    for model_idx in range(n_models):
+        for val_idx in range(n_validation):
+            for score_idx, score in enumerate(clinical_names):
+                coefs = pd.DataFrame(
+                    all_coefs[model_idx][val_idx][score_idx],
+                    columns=["participant_id", "site"] + modified_rois_names)
+                coefs[modified_rois_names] = coefs[modified_rois_names].astype(float)
 
-            for roi_idx, name in enumerate(modified_rois_names):
-                anova_ols = sm.OLS.from_formula(
-                    "{} ~ C(site)".format(name),
-                    data=coefs).fit()
-                anova_res = anova_lm(anova_ols, type=2)
-                anova_pvalues[val_idx, score_idx, roi_idx] = (
-                    anova_res["PR(>F)"]["C(site)"])
+                for roi_idx, name in enumerate(modified_rois_names):
+                    anova_ols = sm.OLS.from_formula(
+                        "{} ~ C(site)".format(name),
+                        data=coefs).fit()
+                    anova_res = anova_lm(anova_ols, type=2)
+                    anova_pvalues[model_idx, val_idx, score_idx, roi_idx] = (
+                        anova_res["PR(>F)"]["C(site)"])
 
     print_result(f"results ANOVA: {anova_pvalues.shape}")
     print(anova_pvalues.min())
     print(anova_pvalues.max())
-    print(anova_pvalues.mean(0).min())
-    print(anova_pvalues.mean(0).max())
-    print(anova_pvalues[:, idx_sign].min())
-    print(anova_pvalues[:, idx_sign].max())
-    print(anova_pvalues[:, idx_sign].mean(0).min())
-    print(anova_pvalues[:, idx_sign].mean(0).max())
+    print(anova_pvalues.mean((0, 1)).min())
+    print(anova_pvalues.mean((0, 1)).max())
+    print(anova_pvalues[:, :, idx_sign].min())
+    print(anova_pvalues[:, :, idx_sign].max())
+    print(anova_pvalues[:, :, idx_sign].mean((0, 1)).min())
+    print(anova_pvalues[:, :, idx_sign].mean((0, 1)).max())
 
-def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_samples=301,
+def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_subjects=301,
             sample_latents=False):
     """ Perform Representational Similarity Analysis (RSA) on estimated
     latent representations.
@@ -602,7 +670,7 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_samples=301,
         `<dataset>_<timestamp>'.
     n_validation: int, default 50
         the number of times we repeat the experiments.
-    n_samples: int, default 50
+    n_subjects: int, default 50
         the number of samples for each clinical score used to compute the
         (dis)similarity matrices.
     seed: int, default 1037
@@ -624,87 +692,98 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_samples=301,
     checkpoints_dir = os.path.join(expdir, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
         flags_file, checkpoints_dir)
-    model = experiment.models
-    if type(model) is list:
-        for m in model:
-            print(model)
-    else:
-        print(model)
+
+    n_models = flags.num_models
     clinical_names = np.load(
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
     rois_names = np.load(
         os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
     modalities = ["clinical", "rois"]
     print_text(f"modalities: {modalities}")
-    trainset = experiment.dataset_train
-    print_text(f"train data: {len(trainset)}")
-    testset = experiment.dataset_test
-    print_text(f"test data: {len(testset)}")
-
-    print_subtitle("Compute blocks correlations using Kendall tau statstic...")
     cov_names = ["age", "sex", "site"]
     if dataset == "euaims":
         cov_names.append("fsiq")
     categorical_covs = ["sex", "site"]
     latent_names = ["joint", "clinical_rois", "clinical_style", "rois_style"]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-    model.eval()
-    kendalltaus = np.zeros((len(latent_names), n_validation, len(clinical_names) + len(cov_names), 2))
+    kendalltaus = np.zeros((n_models, len(latent_names), n_validation, len(clinical_names) + len(cov_names), 2))
     latent_disimilarities, scores_disimilarities = [], []
-    for val_idx in tqdm(range(n_validation)):
-        testloader = DataLoader(
-            testset, batch_size=n_samples, shuffle=True, num_workers=0)
-        data = {}
-        dataiter = iter(testloader)
-        while True:
-            data, _, metadata = next(dataiter)
-            if all([mod in data.keys() for mod in modalities]):
-                break
-        for idx, mod in enumerate(modalities):
-            data[mod] = Variable(data[mod]).to(device).float()
-        for column in metadata.keys():
-            if type(metadata[column]) is list:
-                metadata[column] = np.array(metadata[column])
-            else:
-                metadata[column] = metadata[column].cpu().detach().numpy()
-        test_size = len(data[mod])
-        for latent_idx, latent_name in enumerate(latent_names):
-            latents = model(data, sample_latents=sample_latents)["latents"]
-            if latent_name == "joint":
-                latents = latents["joint"]
-            elif "style" in latent_name:
-                latents = latents["modalities"][latent_name]
-            else:
-                latents = latents["subsets"][latent_name]
-            if sample_latents:
-                latents = model.reparameterize(latents[0], latents[1])
-            else:
-                latents = latents[0]
-            latents = latents.cpu().detach().numpy()
-            print_text(f"latents: {latents.shape}")
-            n_scores = data["clinical"].shape[1]
-            n_subjects = len(latents)
-            cmat = data2cmat(latents)
-            latent_disimilarities.append(cmat)
-            print_text(f"(dis)similarity matrix: {cmat.shape}")
-            scores_cmats = []
-            for score_idx in range(n_scores):
-                score_cmat = vec2cmat(data["clinical"][:, score_idx])
-                scores_cmats.append(score_cmat)
-                tau, pval = fit_rsa(cmat, score_cmat)
-                kendalltaus[latent_idx, val_idx, score_idx, 0] = tau
-                kendalltaus[latent_idx, val_idx, score_idx, 1] = pval
-            for cov_idx, name in enumerate(cov_names):
-                score_cmat = vec2cmat(
-                    metadata[name], categorical=name in categorical_covs)
-                scores_cmats.append(score_cmat)
-                tau, pval = fit_rsa(cmat, score_cmat)
-                kendalltaus[latent_idx, val_idx, n_scores + cov_idx, 0] = tau
-                kendalltaus[latent_idx, val_idx, n_scores + cov_idx, 1] = pval
-        scores_cmats = np.asarray(scores_cmats)
-        scores_disimilarities.append(scores_cmats)
-        print_text(f"scores (dis)similarity matricies: {scores_cmats.shape}")
+    for model_idx in range(n_models):
+        trainset = experiment.dataset_train
+        testset = experiment.dataset_test
+        model = experiment.models
+        if n_models > 1:
+            trainset = trainset[model_idx]
+            testset = testset[model_idx]
+            model = model[model_idx]
+        print_text(f"train data: {len(trainset)}")
+        print_text(f"test data: {len(testset)}")
+
+        print_subtitle("Compute blocks correlations using Kendall tau statstic...")
+        cov_names = ["age", "sex", "site"]
+        if dataset == "euaims":
+            cov_names.append("fsiq")
+        categorical_covs = ["sex", "site"]
+        latent_names = ["joint", "clinical_rois", "clinical_style", "rois_style"]
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
+        model.eval()
+        latent_disimilarities.append([])
+        scores_disimilarities.append([])
+        for val_idx in tqdm(range(n_validation)):
+            testloader = DataLoader(
+                testset, batch_size=n_subjects, shuffle=True, num_workers=0)
+            data = {}
+            dataiter = iter(testloader)
+            while True:
+                data, _, metadata = next(dataiter)
+                if all([mod in data.keys() for mod in modalities]):
+                    break
+            for idx, mod in enumerate(modalities):
+                data[mod] = Variable(data[mod]).to(device).float()
+            for column in metadata.keys():
+                if type(metadata[column]) is list:
+                    metadata[column] = np.array(metadata[column])
+                else:
+                    metadata[column] = metadata[column].cpu().detach().numpy()
+            test_size = len(data[mod])
+            for latent_idx, latent_name in enumerate(latent_names):
+                latents = model(data, sample_latents=sample_latents)["latents"]
+                if latent_name == "joint":
+                    latents = latents["joint"]
+                elif "style" in latent_name:
+                    latents = latents["modalities"][latent_name]
+                else:
+                    latents = latents["subsets"][latent_name]
+                if sample_latents:
+                    latents = model.reparameterize(latents[0], latents[1])
+                else:
+                    latents = latents[0]
+                if latents is not None:
+                    latents = latents.cpu().detach().numpy()
+                    print_text(f"latents: {latents.shape}")
+                    n_scores = data["clinical"].shape[1]
+                    n_subjects = len(latents)
+                    cmat = data2cmat(latents)
+                    latent_disimilarities[model_idx].append(cmat)
+                    print_text(f"(dis)similarity matrix: {cmat.shape}")
+                    scores_cmats = []
+                    for score_idx in range(n_scores):
+                        score_cmat = vec2cmat(data["clinical"][:, score_idx])
+                        scores_cmats.append(score_cmat)
+                        tau, pval = fit_rsa(cmat, score_cmat)
+                        kendalltaus[model_idx, latent_idx, val_idx, score_idx, 0] = tau
+                        kendalltaus[model_idx, latent_idx, val_idx, score_idx, 1] = pval
+                    for cov_idx, name in enumerate(cov_names):
+                        score_cmat = vec2cmat(
+                            metadata[name], categorical=name in categorical_covs)
+                        scores_cmats.append(score_cmat)
+                        tau, pval = fit_rsa(cmat, score_cmat)
+                        kendalltaus[model_idx, latent_idx, val_idx, n_scores + cov_idx, 0] = tau
+                        kendalltaus[model_idx, latent_idx, val_idx, n_scores + cov_idx, 1] = pval
+                scores_cmats = np.asarray(scores_cmats)
+                scores_disimilarities[model_idx].append(scores_cmats)
+                print_text(f"scores (dis)similarity matricies: {scores_cmats.shape}")
     latent_disimilarities = np.asarray(latent_disimilarities)
     print_text(f"latent disimilarities: {latent_disimilarities.shape}")
     scores_disimilarities = np.asarray(scores_disimilarities)
@@ -724,16 +803,16 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_samples=301,
         data = {"score": [], "pval": [], "pval_std": [], "r": [], "r_std": []}
         for score_idx in range(n_scores):
             data["score"].append(clinical_names[score_idx])
-            data["pval"].append(np.mean(kendalltaus[latent_idx, :, score_idx, 1]))
-            data["pval_std"].append(np.std(kendalltaus[latent_idx, :, score_idx, 1]))
-            data["r"].append(np.mean(kendalltaus[latent_idx, :, score_idx, 0]))
-            data["r_std"].append(np.std(kendalltaus[latent_idx, :, score_idx, 0]))
+            data["pval"].append(np.mean(kendalltaus[:, latent_idx, :, score_idx, 1]))
+            data["pval_std"].append(np.std(kendalltaus[:, latent_idx, :, score_idx, 1]))
+            data["r"].append(np.mean(kendalltaus[:, latent_idx, :, score_idx, 0]))
+            data["r_std"].append(np.std(kendalltaus[:, latent_idx, :, score_idx, 0]))
         for cov_idx, cov_name in enumerate(cov_names):
             data["score"].append(cov_name)
-            data["pval"].append(np.mean(kendalltaus[latent_idx, :, n_scores + cov_idx, 1]))
-            data["pval_std"].append(np.std(kendalltaus[latent_idx, :, n_scores + cov_idx, 1]))
-            data["r"].append(np.mean(kendalltaus[latent_idx, :, n_scores + cov_idx, 0]))
-            data["r_std"].append(np.std(kendalltaus[latent_idx, :, n_scores + cov_idx, 0]))
+            data["pval"].append(np.mean(kendalltaus[:, latent_idx, :, n_scores + cov_idx, 1]))
+            data["pval_std"].append(np.std(kendalltaus[:, latent_idx, :, n_scores + cov_idx, 1]))
+            data["r"].append(np.mean(kendalltaus[:, latent_idx, :, n_scores + cov_idx, 0]))
+            data["r_std"].append(np.std(kendalltaus[:, latent_idx, :, n_scores + cov_idx, 0]))
         df = pd.DataFrame.from_dict(data)
         summary_file = os.path.join(rsadir, f"kendalltau_{latent_name}.tsv")
         df.to_csv(summary_file, sep="\t", index=False)
@@ -824,8 +903,8 @@ def rsa_plot_exp(dataset, datasetdir, outdir, run):
 
 
 def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
-                            n_rois=5, plot_radar=True, plot_rois=True,
-                            plot_associations=False):
+                            n_rois=5, plot_associations=False, vote_prop=1,
+                            rescaled=True):
     """ Display specified score histogram across different cohorts.
     Parameters
     ----------
@@ -856,6 +935,13 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
                if os.path.isdir(path)]
     print_text(f"Simulation directories: {','.join(simdirs)}")
 
+    flags_file = os.path.join(expdir, "flags.rar")
+    if not os.path.isfile(flags_file):
+        raise ValueError("You need first to train the model.")
+    checkpoints_dir = os.path.join(expdir, "checkpoints")
+    experiment, flags = MultimodalExperiment.get_experiment(
+        flags_file, checkpoints_dir)
+
     clinical_names = np.load(
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
     clinical_names = clinical_names.tolist()
@@ -863,16 +949,24 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
         os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
     rois_names = rois_names.tolist()
     significativity_thr = 0.05 / len(clinical_names) / len(rois_names)
+    n_models = flags.num_models
+    scalers = experiment.scalers
 
     marker_signif = "star"
     marker_non_signif = "circle"
     for dirname in simdirs:
+        if not os.path.exists(os.path.join(dirname, "coefs.npy")):
+            continue
         coefs = np.load(os.path.join(dirname, "coefs.npy"))
         pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
+
         n_validation = int(
-            dirname.split("n_validation_")[1].split("_n_samples")[0])
-        trust_level = n_validation * trust_level
-        idx_sign = ((pvalues < significativity_thr).sum(axis=0) >= trust_level)
+            dirname.split("n_validation_")[1].split("_n_s")[0])
+        local_trust_level = n_validation * trust_level
+        val_axis = 0 if n_models == 1 else 1
+        idx_sign = ((pvalues < significativity_thr).sum(axis=val_axis) >= local_trust_level)
+        if n_models > 1:
+            idx_sign = idx_sign.sum(0) >= vote_prop * n_models
         data = {"metric": [], "roi": [], "score": []}
         for idx, score in enumerate(clinical_names):
             rois_idx = np.where(idx_sign[idx])
@@ -904,9 +998,12 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
             selected_rois = [item[0] for item in counts.most_common(n_rois)]
             for _roi in selected_rois:
                 roi_idx = rois_names.index(f"{_roi}_{_metric}")
-                selected_scores.append(coefs[:, :, roi_idx].mean(axis=0))
-                significativity.append(
-                    ((pvalues < significativity_thr).sum(axis=0) >= trust_level)[:, roi_idx].tolist())
+                if n_models > 1:
+                    selected_coefs = coefs[:, :, :, roi_idx].mean(axis=(0, 1))
+                else:
+                    selected_coefs = coefs[:, :, roi_idx].mean(axis=0)
+                selected_scores.append(selected_coefs)
+                significativity.append(idx_sign[:, roi_idx].tolist())
             all_selected_rois += [area for area in selected_rois if area not in all_selected_rois]
             selected_scores = np.asarray(selected_scores)
             fig = go.Figure()
@@ -1000,8 +1097,11 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
                 for _roi, _score in zip(significant_rois, significant_scores):
                     score_idx = clinical_names.index(_score)
                     roi_idx = rois_names.index(f"{_roi}_{_metric}")
-                    significant_coefs.append(
-                        coefs[:, score_idx, roi_idx].mean())
+                    if n_models > 1:
+                        significant_coef = coefs[:, :, score_idx, roi_idx].mean()
+                    else:
+                        significant_coef = coefs[:, score_idx, roi_idx].mean()
+                    significant_coefs.append(significant_coef)
                 significant_coefs = np.asarray(significant_coefs)
                 colors = ["rgba(255,0,0,0.4)" if coef > 0 else
                           "rgba(0,0,255,0.4)" for coef in significant_coefs]
@@ -1021,7 +1121,8 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
                 print_result(f"flow for the {_metric} metric: {filename}")
 
 def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
-                          trust_level=0.7, plot_rois=True, plot_weights=True):
+                          trust_level=0.7, plot_rois=True, plot_weights=True,
+                          vote_prop=1, rescaled=True):
     """ Display specified score and metric associations
     Parameters
     ----------
@@ -1051,6 +1152,13 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
                if os.path.isdir(path)]
     print_text(f"Simulation directories: {','.join(simdirs)}")
 
+    flags_file = os.path.join(expdir, "flags.rar")
+    if not os.path.isfile(flags_file):
+        raise ValueError("You need first to train the model.")
+    checkpoints_dir = os.path.join(expdir, "checkpoints")
+    experiment, flags = MultimodalExperiment.get_experiment(
+        flags_file, checkpoints_dir)
+
     clinical_names = np.load(
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
     clinical_names = clinical_names.tolist()
@@ -1058,14 +1166,22 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
         os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
     rois_names = rois_names.tolist()
     significativity_thr = 0.05 / len(clinical_names) / len(rois_names)
+    n_models = flags.num_models
+    scalers = experiment.scalers
 
     for dirname in simdirs:
+        if not os.path.exists(os.path.join(dirname, "coefs.npy")):
+            continue
         coefs = np.load(os.path.join(dirname, "coefs.npy"))
         pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
+
         n_validation = int(
-            dirname.split("n_validation_")[1].split("_n_samples")[0])
-        trust_level = n_validation * trust_level
-        idx_sign = ((pvalues < significativity_thr).sum(axis=0) >= trust_level)
+            dirname.split("n_validation_")[1].split("_n_s")[0])
+        local_trust_level = n_validation * trust_level
+        val_axis = 0 if n_models == 1 else 1
+        idx_sign = ((pvalues < significativity_thr).sum(axis=val_axis) >= local_trust_level)
+        if n_models > 1:
+            idx_sign = idx_sign.sum(0) >= vote_prop * n_models
         data = {"metric": [], "roi": [], "score": []}
         for idx, _score in enumerate(clinical_names):
             rois_idx = np.where(idx_sign[idx])
@@ -1075,12 +1191,32 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
                 data["metric"].append(_metric)
                 data["roi"].append(_name)
         df = pd.DataFrame.from_dict(data)
+        print(df.groupby(["metric", "score"]).count())
 
         areas = df["roi"][(df["metric"] == metric) & (df["score"] == score)].to_list()
         area_idx = [rois_names.index(f"{name}_{metric}") for name in areas]
-        values = coefs[:, clinical_names.index(score), area_idx].mean(0)
+        score_idx = clinical_names.index(score)
+        if n_models > 1:
+            values = coefs[:, :, score_idx, area_idx].mean(axis=(0, 1))
+            if rescaled:
+                scaling_factors = []
+                for roi_idx in area_idx:
+                    scaling_factor = sum([
+                        scalers[i]["rois"].scale_[roi_idx] /
+                        scalers[i]["clinical"].scale_[score_idx]
+                        for i in range(n_models)]) / n_models
+                    scaling_factors.append(scaling_factor)
+                scaling_factors = np.asarray(scaling_factors)
+                values *= scaling_factors
+        else:
+            values = coefs[:, score_idx, area_idx].mean(0)
+            if rescaled:
+                scaling_factors = [scalers["rois"].scale_[roi_idx] /
+                    scalers["clinical"].scale_[score_idx] for roi_idx in area_idx]
+                scaling_factors = np.asarray(scaling_factors)
+                values *= scaling_factors
 
-        print_subtitle(f"Plot regression coefficients ...")        
+        print_subtitle(f"Plot regression coefficients ...")
         color_name = "Plotly"
         if len(areas) <= 6:
             color_name = "tab10"
