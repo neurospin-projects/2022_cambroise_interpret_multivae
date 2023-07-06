@@ -31,9 +31,14 @@ def calc_log_probs(exp, result, batch):
     for m, m_key in enumerate(mods.keys()):
         mod = mods[m_key]
         if mod.name in batch[0].keys():
+            target = batch[0][mod.name]
+            if mod.name in exp.flags.learn_output_covmatrix:
+                cov_matrix = exp.flags.cov_matrices[mod.name].copy()
+                np.fill_diagonal(cov_matrix, target.detach().cpu().numpy())
+                target = torch.from_numpy(cov_matrix)
             log_probs[mod.name] = -mod.calc_log_prob(result["rec"][mod.name],
-                                                    batch[0][mod.name],
-                                                    len(batch[0][mod.name]))
+                                                     target,
+                                                     len(batch[0][mod.name]))
             weighted_log_prob += exp.rec_weights[mod.name]*log_probs[mod.name]
     return log_probs, weighted_log_prob
 
@@ -234,6 +239,18 @@ def run_epochs(exp):
         writer = SummaryWriter(dir_logs)
         tb_logger = TBLogger(log_path, writer)
         tb_logger.writer.add_text("FLAGS", str_flags, 0)
+
+        exp.flags.cov_matrices = {}
+        for mod in exp.flags.modalities:
+            if mod in exp.flags.learn_output_covmatrix:
+                mod_path = os.path.join(
+                    exp.flags.datasetdir, f"{mod}_data.npy")
+                mod_idx = np.load(os.path.join(
+                    exp.flags.datasetdir, "multiblock_idx_train.npz"))[mod]
+                mod_data = np.load(mod_path, mmap_mode="r")[mod_idx]
+                cov_matrix = np.cov(mod_data.reshape((len(mod_data, -1))))
+                exp.flags.cov_matrices[mod] = cov_matrix
+
         for epoch in range(exp.flags.start_epoch, exp.flags.end_epoch):
             utils.printProgressBar(epoch, exp.flags.end_epoch)
             # one epoch of training and testing

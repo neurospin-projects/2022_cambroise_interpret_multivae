@@ -58,10 +58,14 @@ class Decoder(nn.Module):
         if flags.learn_output_sample_scale:
             self.logvar = nn.Linear(input_dim, flags.input_dim[mod_num])
         else:
+            first_dim = (flags.input_dim[mod_num] if flags.mod_names[mod_num]
+                         in flags.learn_output_covmatrix else 1)
             self.logvar = nn.Parameter(
                 data=torch.FloatTensor(
-                    1, flags.input_dim[mod_num]).fill_(flags.initial_out_logvar),
-                requires_grad=flags.learn_output_scale)
+                    first_dim,
+                    flags.input_dim[mod_num]).fill_(flags.initial_out_logvar),
+                requires_grad=(flags.learn_output_scale or
+                               len(flags.learn_output_covmatrix) > 0))
 
     def forward(self, style_latent_space, class_latent_space):
         if self.flags.factorized_representation and self.style_dim > 0:

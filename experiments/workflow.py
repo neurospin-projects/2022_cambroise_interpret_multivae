@@ -46,7 +46,8 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
               num_epochs=1500, eval_freq=25, eval_freq_fid=100, beta=1.,
               data_multiplications=1, dropout_rate=0., initial_out_logvar=-3.,
               learn_output_scale=True, out_scale_per_subject=False,
-              method="joint_elbo", grad_scaling=False):
+              method="joint_elbo", grad_scaling=False,
+              learn_output_covmatrix=False):
     """ Train the model.
     Parameters
     ----------
@@ -58,6 +59,8 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         the destination folder.
     input_dims: list of int
         input dimension for each modality.
+    num_models: int, default 1
+        number of models to train
     latent_dim: int, default 20
         dimension of common factor latent space.
     style_dim: list of int, default [3, 20]
@@ -66,11 +69,11 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         number of hidden laters in the model.
     allow_missing_blocks: bool, default False
         optionally, allows for missing modalities.
-    beta: float, default 5
+    beta: float, default 1
         default weight of sum of weighted divergence terms.
     likelihood: str, default 'normal'
         output distribution.
-    initial_learning_rate: float, default 0.002
+    learning_rate: float, default 0.002
         starting learning rate.
     batch_size: int, default 256
         batch size for training.
@@ -88,11 +91,11 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         the dropout rate in the training.
     initial_out_logvar: float, default -3
         initial output logvar.
-    learn_output_scale: bool, default False
+    learn_output_scale: bool, default True
         optionally, allows for different scales per feature.
+    learn_output_covmatrix:  bool, default False
+        optionally, allows for cov matrix learning.
     """
-    print(input_dims)
-    print(type(input_dims))
     print_title(f"TRAIN: {dataset}")
 
     flags = SimpleNamespace(
@@ -118,7 +121,8 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         dropout_rate=dropout_rate,
         num_samples_fid=10000, num_training_samples_lr=500,
         poe_unimodal_elbos=True, save_figure=False, start_epoch=0, style_dim=style_dim,
-        subsampled_reconstruction=True, data_seed=data_seed, grad_scaling=grad_scaling)
+        subsampled_reconstruction=True, data_seed=data_seed, grad_scaling=grad_scaling,
+        learn_output_covmatrix=learn_output_covmatrix)
     print(flags)
     use_cuda = torch.cuda.is_available()
     flags.device = torch.device("cuda" if use_cuda else "cpu")

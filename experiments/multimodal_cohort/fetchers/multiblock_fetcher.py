@@ -44,7 +44,6 @@ def fetch_multiblock_wrapper(datasetdir, defaults):
             proportion of the dataset to keep for testing. Preprocessing models
             will only be fitted on the training part and applied to the test
             set. You can specify not to use a testing set by setting it to 0.
-            None means it uses the test defined in the openBHB Challenge.
         stratify: string or list of strings, see defaults
             variables to consider when splitting the data, to create balanced
             train / test sets
@@ -76,7 +75,7 @@ def fetch_multiblock_wrapper(datasetdir, defaults):
         path = os.path.join(datasetdir, "multiblock_idx_train.npz")
         metadata_path = os.path.join(datasetdir, "metadata_train.tsv")
         path_test, metadata_path_test = None, None
-        if test_size is None or test_size > 0:
+        if test_size > 0:
             path_test = os.path.join(datasetdir, "multiblock_idx_test.npz")
             metadata_path_test = os.path.join(datasetdir, "metadata_test.tsv")
 
@@ -123,7 +122,7 @@ def fetch_multiblock_wrapper(datasetdir, defaults):
             # all_metadata = extract_and_order_by(metadata, subject_column_name, all_subjects)
             common_metadata = extract_and_order_by(metadata, subject_column_name, common_subjects)
             index_train_subjects = list(range(len(common_subjects)))
-            if test_size is not None and test_size > 0:
+            if test_size > 0:
                 splitter = ShuffleSplit(1, test_size=test_size,
                                         random_state=seed)
                 y = None
@@ -142,16 +141,10 @@ def fetch_multiblock_wrapper(datasetdir, defaults):
                         #     for miss in missing_modalities]
                 index_train_subjects, index_test_subjects = next(
                     splitter.split(common_subjects, y))
-            elif test_size is None:
-                index_train_subjects = [
-                    idx for idx, sub in enumerate(common_subjects)
-                    if sub in subjects_train]
-                index_test_subjects = [
-                    idx for idx, sub in enumerate(common_subjects)
-                    if sub in subjects_test]                
+              
 
             subjects_train = np.array(common_subjects)[index_train_subjects]
-            if test_size is None or test_size > 0:
+            if test_size > 0:
                 subjects_test = np.array(common_subjects)[index_test_subjects]
             if allow_missing_blocks:
                 subjects_train = np.array(subjects_train.tolist() + other_subjects)

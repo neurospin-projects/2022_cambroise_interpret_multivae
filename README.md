@@ -1,7 +1,7 @@
 ![Pep8](https://github.com/neurospin-projects/2022_cambroise_interpret_multivae/actions/workflows/pep8.yml/badge.svg)
 
 
-# Mixture-of-Products-of-Experts (MoPoE) VAE 
+# Multi-view variational autoencoders allow for interpretability leveraging Digital Avatars: application to the HBN cohort
 
 \:+1: If you are using the code please add a star to the repository :+1:
 
@@ -13,7 +13,7 @@ different data types. Further, the understanding of different modalities and
 the interplaybetween data types are non-trivial research questions and
 long-standing goals in machine learning research.
 
-This is the official code for the ISBI 2023.
+This is the official repository for our ISBI 2023 paper associated code.
 If you have any question about the code or the paper, we are happy to help!
 
 
@@ -75,7 +75,7 @@ export OUTDIR=/path/to/the/output/directory
 
 ./experiments train --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR
 --latent_dim 20 --input_dims 7,444 --beta 1 --batch_size 256
---likelihood normal --initial_learning_rate 0.002 --n_epochs 550
+--likelihood normal --learning_rate 0.002 --num_epochs 550
 --learn_output_scale --allow_missing_blocks
 
 export RUN=my_run_id
@@ -93,7 +93,10 @@ export RUN=my_run_id
 Citation
 ========
 
-There is no paper published yet about this project.
+If you are using this repository or building research on it, it would be great to cite our paper :
+Corentin Ambroise, Antoine Grigis, Edouard Duchesnay, Vincent Frouin (2023).
+[Multi-view variational autoencoders allow for interpretability leveraging Digital Avatars: application to the HBN cohort](https://ieeexplore.ieee.org/xpl/conhome/1000080/all-proceedings). ISBI 2023
+
 This works is dervived from the following papers:
 
 Thomas M. Sutter, Imant Daunhawer, Julia E Vogt (2021).
