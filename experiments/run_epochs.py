@@ -33,8 +33,11 @@ def calc_log_probs(exp, result, batch):
         if mod.name in batch[0].keys():
             target = batch[0][mod.name]
             if mod.name in exp.flags.learn_output_covmatrix:
-                cov_matrix = exp.flags.cov_matrices[mod.name].copy()
-                np.fill_diagonal(cov_matrix, target.detach().cpu().numpy())
+                cov_matrix = np.repeat(
+                    exp.flags.cov_matrices[mod.name], len(target), axis=0)
+                for idx in range(len(target)):
+                    np.fill_diagonal(
+                        cov_matrix[idx], target.detach().cpu().numpy())
                 target = torch.from_numpy(cov_matrix)
             log_probs[mod.name] = -mod.calc_log_prob(result["rec"][mod.name],
                                                      target,
