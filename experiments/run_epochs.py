@@ -241,7 +241,7 @@ def run_epochs(exp):
         tb_logger.writer.add_text("FLAGS", str_flags, 0)
 
         exp.flags.cov_matrices = {}
-        for mod in exp.flags.modalities:
+        for mod in exp.modalities:
             if mod in exp.flags.learn_output_covmatrix:
                 mod_path = os.path.join(
                     exp.flags.datasetdir, f"{mod}_data.npy")
