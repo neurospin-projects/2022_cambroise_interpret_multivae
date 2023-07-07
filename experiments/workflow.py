@@ -47,7 +47,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
               data_multiplications=1, dropout_rate=0., initial_out_logvar=-3.,
               learn_output_scale=True, out_scale_per_subject=False,
               method="joint_elbo", grad_scaling=False,
-              learn_output_covmatrix=False):
+              learn_output_covmatrix=[]):
     """ Train the model.
     Parameters
     ----------
@@ -93,8 +93,8 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         initial output logvar.
     learn_output_scale: bool, default True
         optionally, allows for different scales per feature.
-    learn_output_covmatrix:  bool, default False
-        optionally, allows for cov matrix learning.
+    learn_output_covmatrix:  list, default []
+        list the modalities for which to learn cov matrix in likelihood model.
     """
     print_title(f"TRAIN: {dataset}")
 
