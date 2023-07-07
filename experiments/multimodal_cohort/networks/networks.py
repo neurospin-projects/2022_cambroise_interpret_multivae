@@ -41,7 +41,7 @@ class Decoder(nn.Module):
     Adopted from:
     https://www.cs.toronto.edu/~lczhang/360/lec/w05/autoencoder.html
     """
-    def __init__(self, flags, mod_num):
+    def __init__(self, flags, mod_num, mod_name):
         super(Decoder, self).__init__()
         self.flags = flags
         self.shared_decoder = nn.Sequential()
@@ -58,7 +58,7 @@ class Decoder(nn.Module):
         if flags.learn_output_sample_scale:
             self.logvar = nn.Linear(input_dim, flags.input_dim[mod_num])
         else:
-            first_dim = (flags.input_dim[mod_num] if flags.mod_names[mod_num]
+            first_dim = (flags.input_dim[mod_num] if mod_name
                          in flags.learn_output_covmatrix else 1)
             self.logvar = nn.Parameter(
                 data=torch.FloatTensor(
