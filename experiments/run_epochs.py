@@ -248,6 +248,7 @@ def run_epochs(exp):
                 mod_idx = np.load(os.path.join(
                     exp.flags.datasetdir, "multiblock_idx_train.npz"),
                     allow_pickle=True)[mod]
+                mod_idx = mod_idx[mod_idx != None].astype(int)
                 mod_data = np.load(mod_path, mmap_mode="r")[mod_idx]
                 cov_matrix = np.cov(mod_data.reshape((len(mod_data, -1))))
                 exp.flags.cov_matrices[mod] = cov_matrix
