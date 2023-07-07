@@ -71,7 +71,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         optionally, allows for missing modalities.
     beta: float, default 1
         default weight of sum of weighted divergence terms.
-    likelihood: str, default 'normal'
+    likelihood: str or list, default 'normal'
         output distribution.
     learning_rate: float, default 0.002
         starting learning rate.
@@ -148,6 +148,9 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
     flags.alpha_modalities.extend([
         flags.div_weight for _ in range(flags.num_mods)])
     create_dir_structure(flags)
+
+    if not type(flags.likelihood) is list:
+        flags.likelihood = [flags.likelihood] * len(flags.input_dim)
 
     if not flags.factorized_representation:
         flags.style_dim = [0] * len(flags.style_dim)

@@ -137,7 +137,7 @@ class MultimodalExperiment(BaseExperiment):
         mods = [Clinical, Rois]
         mods = [mods[m](self.flags.input_dim[m], Encoder,
                         Decoder, self.flags.class_dim,
-                        self.flags.style_dim[m], self.flags.likelihood)
+                        self.flags.style_dim[m], self.flags.likelihood[m])
                         for m in range(self.num_modalities)]
         mods_dict = {m.name: m for m in mods}
         mod_names = list(mods_dict)
