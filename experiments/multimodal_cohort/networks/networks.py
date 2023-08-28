@@ -65,7 +65,7 @@ class Decoder(nn.Module):
                 data=torch.FloatTensor(
                     *logvar_dim).fill_(flags.initial_out_logvar),
                 requires_grad=(flags.learn_output_scale or
-                               len(flags.learn_output_covmatrix) > 0))
+                               mod_name in flags.learn_output_covmatrix))
 
     def forward(self, style_latent_space, class_latent_space):
         if self.flags.factorized_representation and self.style_dim > 0:
@@ -78,6 +78,8 @@ class Decoder(nn.Module):
             logvar = self.logvar(h)
         else:
             logvar = self.logvar
+        if self.logvar.ndim == 3:
+            logvar = torch.matmul(logvar, logvar.transpose(1, 2))
         return x_hat, (logvar * 0.5).exp().to(z.device)
 
 

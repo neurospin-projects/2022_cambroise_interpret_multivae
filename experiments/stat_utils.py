@@ -52,7 +52,8 @@ def vec2cmat(vec, categorical=False, metric="euclidean"):
         cmat = (vec[:, None] != vec).astype(int)
     return cmat
 
-def make_regression(df, x_name, y_name, other_cov_names=[], groups_name=None, method="fixed", other=None):
+def make_regression(df, x_name, y_name, other_cov_names=[], groups_name=None,
+                    method="fixed"):
     """ Fit linear models with the wanted design
     """
     formula = "{} ~ {}".format(y_name, x_name)
@@ -66,16 +67,11 @@ def make_regression(df, x_name, y_name, other_cov_names=[], groups_name=None, me
     elif method == "hierarchical":
         lv1 = [[group_lab, sm.OLS.from_formula(formula, group_df).fit().params[x_name]]
                for group_lab, group_df in df.groupby(groups_name, sort=False)]
-        # lv1_betas = [[group_lab, result.params[x_name]] for group_lab, result in lv1]
-        # lv1_intercepts = [[group_lab, result.params["Intercept"]] for group_lab, result in lv1]
         lv1 = pd.DataFrame(lv1, columns=[groups_name, 'beta'])
         subjects_betas = lv1
         est = sm.OLS.from_formula("beta ~ 1", data=lv1)
         idx_of_beta = "Intercept"
     results = est.fit()
-    # corr, pval = pearsonr([intercept for _, intercept in lv1_intercepts], other)
-    # print([intercept for _, intercept in lv1_intercepts])
-    # print(other.tolist())
     return results.pvalues[idx_of_beta], results.params[idx_of_beta], subjects_betas
 
 def fit_rsa(cmat, ref_cmat, idxs=None):

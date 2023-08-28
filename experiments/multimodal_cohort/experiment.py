@@ -95,6 +95,10 @@ class MultimodalExperiment(BaseExperiment):
         flags = torch.load(flags_file)
         if not "num_models" in vars(flags):
             flags.num_models = 1
+        if not "learn_output_covmatrix" in vars(flags):
+            flags.learn_output_covmatrix = []
+        if not type(flags.likelihood) is list:
+            flags.likelihood = [flags.likelihood] * len(flags.input_dim)
         use_cuda = torch.cuda.is_available()
         flags.device = torch.device("cuda" if use_cuda else "cpu")
         experiment = MultimodalExperiment(flags)

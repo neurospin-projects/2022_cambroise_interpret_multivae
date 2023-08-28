@@ -728,3 +728,7 @@ def print_text(text):
     if IS_COLOR_TERM:
         text = stylize(text, fg(fg_colors["text"]))
     print(text)
+
+def print_flags(flags):
+    for key, value in vars(flags).items():
+        print(f"{key} : {value}")
