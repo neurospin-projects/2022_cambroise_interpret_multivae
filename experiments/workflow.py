@@ -289,21 +289,12 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling="likelihood",
     pvalues = np.load(pvals_file)
 
     print_subtitle("Compute statistics significativity...")
-    corrected_thr = (0.05 / n_rois / n_scores)
-    idx_sign = compute_significativity(pvalues, trust_level, vote_prop,
-                                       params, corrected_thr)
+    idx_sign, significant_assoc = compute_significativity(
+        pvalues, trust_level, vote_prop, n_validation, additional_data,
+        correct_threshold=True)
 
-    data = {"metric": [], "roi": [], "score": []}
-    for idx, score in enumerate(clinical_names):
-        rois_idx = np.where(idx_sign[idx])
-        for name in rois_names[rois_idx]:
-            name, metric = name.rsplit("_", 1)
-            data["score"].append(score)
-            data["metric"].append(metric)
-            data["roi"].append(name)
-    df = pd.DataFrame.from_dict(data)
     significant_file = os.path.join(resdir, "significant_rois.tsv")
-    df.to_csv(significant_file, sep="\t", index=False)
+    significant_assoc.to_csv(significant_file, sep="\t", index=False)
     print_result(f"significant ROIs: {significant_file}")
     print(df.groupby(["metric", "score"]).count())
 
@@ -714,8 +705,15 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
     clinical_names = clinical_names.tolist()
     rois_names = np.load(
         os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
+    metadata = pd.read_table(
+        os.path.join(datasetdir, "metadata_train.tsv"))
+    metadata_columns = metadata.columns.tolist()
+
+    additional_data = SimpleNamespace(metadata_columns=metadata_columns,
+                                      clinical_names=clinical_names,
+                                      rois_names=rois_names)
+
     rois_names = rois_names.tolist()
-    significativity_thr = 0.05 / len(clinical_names) / len(rois_names)
     n_models = flags.num_models
     scalers = experiment.scalers
 
@@ -729,20 +727,10 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
 
         n_validation = int(
             dirname.split("n_validation_")[1].split("_n_s")[0])
-        local_trust_level = n_validation * trust_level
-        val_axis = 0 if n_models == 1 else 1
-        idx_sign = ((pvalues < significativity_thr).sum(axis=val_axis) >= local_trust_level)
-        if n_models > 1:
-            idx_sign = idx_sign.sum(0) >= vote_prop * n_models
-        data = {"metric": [], "roi": [], "score": []}
-        for idx, score in enumerate(clinical_names):
-            rois_idx = np.where(idx_sign[idx])
-            for name in np.array(rois_names)[rois_idx]:
-                name, metric = name.rsplit("_", 1)
-                data["score"].append(score)
-                data["metric"].append(metric)
-                data["roi"].append(name)
-        df = pd.DataFrame.from_dict(data)
+
+        idx_sign, df = compute_significativity(
+            pvalues, trust_level, vote_prop, n_validation, additional_data,
+            correct_threshold=True)
 
         print_subtitle(f"Plot regression coefficients radar plots...")
         counts = collections.Counter(df["roi"].values)
@@ -926,6 +914,13 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
     clinical_names = clinical_names.tolist()
     rois_names = np.load(
         os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
+    metadata = pd.read_table(
+        os.path.join(datasetdir, "metadata_train.tsv"))
+    metadata_columns = metadata.columns.tolist()
+
+    additional_data = SimpleNamespace(metadata_columns=metadata_columns,
+                                      clinical_names=clinical_names,
+                                      rois_names=rois_names)
     rois_names = rois_names.tolist()
     significativity_thr = 0.05 / len(clinical_names) / len(rois_names)
     n_models = flags.num_models
@@ -940,21 +935,9 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
 
         n_validation = int(
             dirname.split("n_validation_")[1].split("_n_s")[0])
-        local_trust_level = n_validation * trust_level
-
-        idx_sign = ((pvalues < significativity_thr).sum(axis=1) >= local_trust_level)
-        idx_sign = idx_sign.sum(0) >= vote_prop * len(pvalues)
-
-        data = {"metric": [], "roi": [], "score": []}
-        for idx, _score in enumerate(clinical_names):
-            rois_idx = np.where(idx_sign[idx])
-            for name in np.array(rois_names)[rois_idx]:
-                _name, _metric = name.rsplit("_", 1)
-                data["score"].append(_score)
-                data["metric"].append(_metric)
-                data["roi"].append(_name)
-        df = pd.DataFrame.from_dict(data)
-        print(df.groupby(["metric", "score"]).count())
+        _, df = compute_significativity(
+            pvalues, trust_level, vote_prop, n_validation, additional_data,
+            correct_threshold=True)
 
         areas = df["roi"][(df["metric"] == metric) & (df["score"] == score)].to_list()
         area_idx = [rois_names.index(f"{name}_{metric}") for name in areas]
@@ -995,7 +978,6 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
         plt.rcParams.update({'font.size': 20, "font.family": "serif"})
         plot_areas(areas, np.arange(len(areas)) + 0.01, filename_areas, color_name)
         plot_coefs(areas, values, filename_bar, color_name)
-            
 
 
 def avatar_plot_exp(dataset, datasetdir, outdir, run):

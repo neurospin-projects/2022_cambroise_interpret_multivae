@@ -254,6 +254,13 @@ def compute_daa_statistics(outdir, run, params, additional_data,
     """
 
     print_subtitle("Fitting regressions for statistics.")
+    
+    # Set environ variable for when computing lots of regressions (but with
+    # parallel and MKL with big matrices, see github issue
+    os.environ["MKL_NUM_THREADS"] = "1"
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["MKL_DYNAMIC"] = "FALSE"
+
     expdir = os.path.join(outdir, run)
     daadir = os.path.join(expdir, "daa")
     if not os.path.isdir(daadir):
@@ -338,6 +345,8 @@ def compute_daa_statistics(outdir, run, params, additional_data,
             all_rois_reconstructions[model_idx][val_idx],
             params) for model_idx, val_idx, score_idx, roi_idx in
         product_of_params)
+
+    print_subtitle("All regression computed. Saving results.")
 
     for model_idx in range(n_models):
         for val_idx in range(params.n_validation):
@@ -431,13 +440,32 @@ def compute_regressions(score_idx, roi_idx, base_df, rois_avatars,
     return results
 
 
-def compute_significativity(pvalues, trust_level, vote_prop, params,
-                            corrected_thr):
+def compute_significativity(pvalues, trust_level, vote_prop, n_validation,
+                            additional_data, threshold=0.05,
+                            correct_threshold=True):
     """ Compute significative relationship indices
     """
     print_subtitle("Compute statistics significativity...")
-    trust_level = params.n_validation * trust_level
-    print_text(f"voting trust level: {trust_level} / {params.n_validation}")
-    idx_sign = ((pvalues < corrected_thr).sum(axis=1) >= trust_level)
+
+    n_scores = len(additional_data.clinical_names)
+    n_rois = len(additional_data.rois_names)
+
+    if correct_threshold:
+        threshold = (threshold / n_rois / n_scores)
+
+    scaled_trust_level = n_validation * trust_level
+    print_text(f"voting trust level: {scaled_trust_level} / {n_validation}")
+    idx_sign = ((pvalues < corrected_thr).sum(axis=1) >= scaled_trust_level)
     idx_sign = idx_sign.sum(0) >= vote_prop * len(pvalues)
-    return idx_sign
+
+    data = {"metric": [], "roi": [], "score": []}
+    for idx, score in enumerate(additional_data.clinical_names):
+        rois_idx = np.where(idx_sign[idx])
+        for name in additional_data.rois_names[rois_idx]:
+            name, metric = name.rsplit("_", 1)
+            data["score"].append(score)
+            data["metric"].append(metric)
+            data["roi"].append(name)
+    significant_assoc = pd.DataFrame.from_dict(data)
+    print(significant_assoc.groupby(["metric", "score"]).count())
+    return idx_sign, significant_assoc
