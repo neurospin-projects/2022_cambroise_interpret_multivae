@@ -15,7 +15,7 @@ Organize the analysis steps.
 # System import
 import fire
 import workflow as wf
-from analyze_avatars import analyze_avatars, assess_robustness, univariate_tests
+from analyze_avatars import analyze_avatars, assess_robustness, univariate_tests, evaluate_stability
 
 
 fire.Fire({
@@ -23,12 +23,15 @@ fire.Fire({
     "daa": wf.daa_exp,
     "anova": wf.anova_exp,
     "daa-plot-most-connected": wf.daa_plot_most_connected,
+    "daa-plot-most-significant": wf.daa_plot_most_significant,
     "daa-plot-score-metric": wf.daa_plot_score_metric,
+    "daa-plot-score-metric-strongest": wf.daa_plot_score_metric_strongest,
     "rsa": wf.rsa_exp,
     "rsa-plot": wf.rsa_plot_exp,
     "hist-plot": wf.hist_plot_exp,
     # "avatar-plot": wf.avatar_plot_exp,
     "daa-analysis": analyze_avatars,
     "daa-robustness": assess_robustness,
-    "univariate-tests": univariate_tests
+    "univariate-tests": univariate_tests,
+    "daa-evaluate-stability": evaluate_stability
 })

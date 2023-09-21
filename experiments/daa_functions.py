@@ -348,20 +348,22 @@ def compute_daa_statistics(outdir, run, params, additional_data,
 
     print_subtitle("All regression computed. Saving results.")
 
-    for model_idx in range(n_models):
-        for val_idx in range(params.n_validation):
-            for score_idx in range(n_scores):
-                for roi_idx in range(n_rois):
-                    results = all_results[product_of_params.index((model_idx, val_idx, score_idx, roi_idx))]
-                    new_pvals, new_coefs, all_betas = results
-                    pvalues[model_idx, val_idx, score_idx, roi_idx] = new_pvals
-                    coefs[model_idx, val_idx, score_idx, roi_idx] = new_coefs
-                    if params.reg_method == "hierarchical" and save_all_coefs:
-                        roi_name = additional_data.rois_names[roi_idx].replace(
-                            "&", "_").replace("-", "_")
-                        all_betas.rename(columns={"beta": roi_name}, inplace=True)
-                        all_coefs[model_idx, val_idx, score_idx] = all_coefs[model_idx, val_idx, score_idx].join(
-                            all_betas.set_index("participant_id"), on="participant_id")
+    for param_index, param_values in enumerate(product_of_params):
+        model_idx, val_idx, score_idx, roi_idx = param_values
+    # for model_idx in range(n_models):
+    #     for val_idx in range(params.n_validation):
+    #         for score_idx in range(n_scores):
+    #             for roi_idx in range(n_rois):
+        # results = all_results[product_of_params.index((model_idx, val_idx, score_idx, roi_idx))]
+        new_pvals, new_coefs, all_betas = all_results[param_index]
+        pvalues[model_idx, val_idx, score_idx, roi_idx] = new_pvals
+        coefs[model_idx, val_idx, score_idx, roi_idx] = new_coefs
+        if params.reg_method == "hierarchical" and save_all_coefs:
+            roi_name = additional_data.rois_names[roi_idx].replace(
+                "&", "_").replace("-", "_")
+            all_betas.rename(columns={"beta": roi_name}, inplace=True)
+            all_coefs[model_idx, val_idx, score_idx] = all_coefs[model_idx, val_idx, score_idx].join(
+                all_betas.set_index("participant_id"), on="participant_id")
     
 
     np.save(pvals_file, pvalues)
@@ -442,10 +444,11 @@ def compute_regressions(score_idx, roi_idx, base_df, rois_avatars,
 
 def compute_significativity(pvalues, trust_level, vote_prop, n_validation,
                             additional_data, threshold=0.05,
-                            correct_threshold=True):
+                            correct_threshold=True, verbose=True):
     """ Compute significative relationship indices
     """
-    print_subtitle("Compute statistics significativity...")
+    if verbose:
+        print_subtitle("Compute statistics significativity...")
 
     n_scores = len(additional_data.clinical_names)
     n_rois = len(additional_data.rois_names)
@@ -454,8 +457,9 @@ def compute_significativity(pvalues, trust_level, vote_prop, n_validation,
         threshold = (threshold / n_rois / n_scores)
 
     scaled_trust_level = n_validation * trust_level
-    print_text(f"voting trust level: {scaled_trust_level} / {n_validation}")
-    idx_sign = ((pvalues < corrected_thr).sum(axis=1) >= scaled_trust_level)
+    if verbose:
+        print_text(f"voting trust level: {scaled_trust_level} / {n_validation}")
+    idx_sign = ((pvalues < threshold).sum(axis=1) >= scaled_trust_level)
     idx_sign = idx_sign.sum(0) >= vote_prop * len(pvalues)
 
     data = {"metric": [], "roi": [], "score": []}
@@ -467,5 +471,6 @@ def compute_significativity(pvalues, trust_level, vote_prop, n_validation,
             data["metric"].append(metric)
             data["roi"].append(name)
     significant_assoc = pd.DataFrame.from_dict(data)
-    print(significant_assoc.groupby(["metric", "score"]).count())
+    if verbose:
+        print(significant_assoc.groupby(["metric", "score"]).count())
     return idx_sign, significant_assoc

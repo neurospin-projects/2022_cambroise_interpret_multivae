@@ -19,7 +19,7 @@ from multimodal_cohort.dataset import MultimodalDataset, DataManager
 
 from multimodal_cohort.constants import short_clinical_names
 from multimodal_cohort.networks.VAE import VAE
-from multimodal_cohort.networks.networks import Encoder, Decoder
+from multimodal_cohort.networks.networks import Encoder, Decoder, SurfaceEncoder, SurfaceDecoder
 
 from utils.BaseExperiment import BaseExperiment
 
@@ -99,6 +99,8 @@ class MultimodalExperiment(BaseExperiment):
             flags.learn_output_covmatrix = []
         if not type(flags.likelihood) is list:
             flags.likelihood = [flags.likelihood] * len(flags.input_dim)
+        if not "use_surface" in vars(flags):
+            flags.use_surface = False
         use_cuda = torch.cuda.is_available()
         flags.device = torch.device("cuda" if use_cuda else "cpu")
         experiment = MultimodalExperiment(flags)
@@ -138,9 +140,19 @@ class MultimodalExperiment(BaseExperiment):
             self.flags.style_dim = [self.flags.style_dim] * self.num_modalities
         elif len(self.flags.style_dim) != self.num_modalities:
             self.flags.style_dim = [self.flags.style_dim[0]] * self.num_modalities
-        mods = [Clinical, Rois]
-        mods = [mods[m](self.flags.input_dim[m], Encoder,
-                        Decoder, self.flags.class_dim,
+        mods = [Clinical]
+        encoders = [Encoder]
+        decoders = [Decoder]
+        if self.flags.use_surface:
+            mods.append(Surface)
+            encoders.append(SphericalHemiEncoder)
+            decoders.append(SphericalHemiDecoder)
+        else:
+            mods.append(Rois)
+            encoders.append(Encoder)
+            decoders.append(Decoder)
+        mods = [mods[m](self.flags.input_dim[m], encoders[m],
+                        decoders[m], self.flags.class_dim,
                         self.flags.style_dim[m], self.flags.likelihood[m])
                         for m in range(self.num_modalities)]
         mods_dict = {m.name: m for m in mods}

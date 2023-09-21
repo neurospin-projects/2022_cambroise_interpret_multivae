@@ -39,8 +39,9 @@ from daa_functions import (make_digital_avatars, compute_daa_statistics,
                            compute_significativity)
 
 
-def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
-              latent_dim=20, style_dim=[3, 20], data_seed="defaults",
+def train_exp(dataset, datasetdir, outdir, input_dims, input_channels=3,
+              input_ico_order=5, use_surface=False, num_models=1, latent_dim=20,
+              style_dim=[3, 20], data_seed="defaults",
               num_hidden_layer_encoder=1, num_hidden_layer_decoder=0,
               allow_missing_blocks=True, factorized_representation=True,
               likelihood="normal", learning_rate=0.002, batch_size=256,
@@ -110,8 +111,9 @@ def train_exp(dataset, datasetdir, outdir, input_dims, num_models=1,
         end_epoch=num_epochs, eval_freq=eval_freq, eval_freq_fid=eval_freq_fid,
         factorized_representation=factorized_representation, img_size_m1=28, img_size_m2=32,
         inception_state_dict="../inception_state_dict.pth",
-        initial_learning_rate=learning_rate,
+        initial_learning_rate=learning_rate, use_surface=use_surface,
         initial_out_logvar=initial_out_logvar, input_dim=input_dims,
+        input_channels=input_channels, input_ico_order=input_ico_order,
         joint_elbo=False, kl_annealing=0, include_prior_expert=False,
         learn_output_scale=learn_output_scale, learn_output_sample_scale=out_scale_per_subject,
         len_sequence=8, likelihood=likelihood, load_saved=False, method=method,
@@ -296,7 +298,6 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling="likelihood",
     significant_file = os.path.join(resdir, "significant_rois.tsv")
     significant_assoc.to_csv(significant_file, sep="\t", index=False)
     print_result(f"significant ROIs: {significant_file}")
-    print(df.groupby(["metric", "score"]).count())
 
 
 def anova_exp(dataset, datasetdir, outdir, run, n_validation=5,
@@ -720,6 +721,7 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
     marker_signif = "star"
     marker_non_signif = "circle"
     for dirname in simdirs:
+        print_subtitle(f"Drawing radar plots for {dirname}")
         if not os.path.exists(os.path.join(dirname, "coefs.npy")):
             continue
         coefs = np.load(os.path.join(dirname, "coefs.npy"))
@@ -753,10 +755,10 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
             selected_rois = [item[0] for item in counts.most_common(n_rois)]
             for _roi in selected_rois:
                 roi_idx = rois_names.index(f"{_roi}_{_metric}")
-                if n_models > 1:
-                    selected_coefs = coefs[:, :, :, roi_idx].mean(axis=(0, 1))
-                else:
-                    selected_coefs = coefs[:, :, roi_idx].mean(axis=0)
+                #if n_models > 1:
+                selected_coefs = coefs[:, :, :, roi_idx].mean(axis=(0, 1))
+                # else:
+                #    selected_coefs = coefs[:, :, roi_idx].mean(axis=0)
                 selected_scores.append(selected_coefs)
                 significativity.append(idx_sign[:, roi_idx].tolist())
             all_selected_rois += [area for area in selected_rois if area not in all_selected_rois]
@@ -852,10 +854,10 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
                 for _roi, _score in zip(significant_rois, significant_scores):
                     score_idx = clinical_names.index(_score)
                     roi_idx = rois_names.index(f"{_roi}_{_metric}")
-                    if n_models > 1:
-                        significant_coef = coefs[:, :, score_idx, roi_idx].mean()
-                    else:
-                        significant_coef = coefs[:, score_idx, roi_idx].mean()
+                    # if n_models > 1:
+                    significant_coef = coefs[:, :, score_idx, roi_idx].mean()
+                    # else:
+                    #   significant_coef = coefs[:, score_idx, roi_idx].mean()
                     significant_coefs.append(significant_coef)
                 significant_coefs = np.asarray(significant_coefs)
                 colors = ["rgba(255,0,0,0.4)" if coef > 0 else
@@ -874,6 +876,228 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
                     dirname, f"score2roi_{_metric}_flow.png")
                 fig.write_image(filename)
                 print_result(f"flow for the {_metric} metric: {filename}")
+
+
+def daa_plot_most_significant(dataset, datasetdir, outdir, run, n_rois=5,
+                              use_coefficients=False):
+    """ Display specified score histogram across different cohorts.
+    Parameters
+    ----------
+    dataset: str
+        the dataset name: euaims or hbn.
+    datasetdir: str
+        the path to the dataset associated data.
+    outdir: str
+        the destination folder.
+    run: str
+        the name of the experiment in the destination folder:
+        `<dataset>_<timestamp>'.
+    """
+    from plotting import plot_surf_mosaic, plot_areas
+    from multimodal_cohort.constants import short_clinical_names
+    import plotly.graph_objects as go
+    import matplotlib.pyplot as plt
+    from nilearn import datasets
+    import seaborn as sns
+    from color_utils import plt_to_plotly_rgb, get_color_list
+
+    print_title(f"PLOT DAA most associated rois: {dataset}")
+    expdir = os.path.join(outdir, run)
+    daadir = os.path.join(expdir, "daa")
+    print_text(f"experimental directory: {expdir}")
+    print_text(f"DAA directory: {daadir}")
+    simdirs = [path for path in glob.glob(os.path.join(daadir, "*"))
+               if os.path.isdir(path)]
+    print_text(f"Simulation directories: {','.join(simdirs)}")
+
+    flags_file = os.path.join(expdir, "flags.rar")
+    if not os.path.isfile(flags_file):
+        raise ValueError("You need first to train the model.")
+    checkpoints_dir = os.path.join(expdir, "checkpoints")
+    # experiment, flags = MultimodalExperiment.get_experiment(
+    #     flags_file, checkpoints_dir)
+
+    clinical_names = np.load(
+        os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
+    clinical_names = clinical_names.tolist()
+    rois_names = np.load(
+        os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
+    metadata = pd.read_table(
+        os.path.join(datasetdir, "metadata_train.tsv"))
+    metadata_columns = metadata.columns.tolist()
+
+    # additional_data = SimpleNamespace(metadata_columns=metadata_columns,
+    #                                   clinical_names=clinical_names,
+    #                                   rois_names=rois_names)
+
+    rois_names = rois_names.tolist()
+
+    marker_signif = "star"
+    marker_non_signif = "circle"
+    for dirname in simdirs:
+        print_subtitle(f"Drawing radar plots for {dirname}")
+        if not os.path.exists(os.path.join(dirname, "coefs.npy")):
+            continue
+        coefs = np.load(os.path.join(dirname, "coefs.npy"))
+        pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
+
+        # n_validation = int(
+        #     dirname.split("n_validation_")[1].split("_n_s")[0])
+
+        # idx_sign, df = compute_significativity(
+        #     pvalues, trust_level, vote_prop, n_validation, additional_data,
+        #     correct_threshold=True)
+
+        print_subtitle(f"Plot regression coefficients radar plots...")
+        # counts = collections.Counter(df["roi"].values)
+        # selected_rois = [item[0] for item in counts.most_common()]
+        n_colors = n_rois * 3
+        color_name = "Plotly"
+        if n_colors > 9:
+            color_name = "Paired"
+        if n_colors > 12:
+            color_name = "tab20"
+        textfont = dict(
+            size=20,
+            family="Droid Serif")
+        colors = get_color_list(color_name, n_colors)
+        all_selected_rois = []
+        average_pvalues = pvalues.mean((0, 1))
+        std_pvalues = pvalues.std((0, 1))
+        average_coefs = coefs.mean((0, 1))
+        std_coefs = coefs.std((0, 1))
+
+        rois = np.array(list(set([name.rsplit("_", 1)[0] for name in rois_names])))
+
+        for _metric in ["thickness", "meancurv", "area"]:
+            selected_coefs = []
+            metric_indices = np.array(
+                [rois_names.index(f"{_roi}_{_metric}") for _roi in rois])
+            if use_coefficients:
+                most_significant_indices = np.argsort(
+                    np.absolute(average_coefs[:, metric_indices]), axis=None)[::-1]
+            else:
+                most_significant_indices = np.argsort(
+                    average_pvalues[:, metric_indices], axis=None)
+
+            rois_indices = np.array([idx % len(rois) for idx in 
+                                     most_significant_indices[:n_rois * 5]])
+            _, unique_idx = np.unique(rois_indices, return_index=True)
+            rois_indices = rois_indices[np.sort(unique_idx)[:n_rois]]
+            selected_rois = rois[roi_indices]
+            all_selected_rois += [area for area in selected_rois
+                                  if area not in all_selected_rois]
+            selected_coefs = np.absolute(average_coefs[:, metric_indices[roi_indices]])
+            selected_coefs_std = std_coefs[:, metric_indices[roi_indices]]
+
+            fig = go.Figure()
+            for roi_idx, _roi in enumerate(selected_rois):
+                color_idx = all_selected_rois.index(_roi)
+                color = plt_to_plotly_rgb(colors[color_idx])
+                _scores = selected_coefs[:, roi_idx].tolist()
+                _scores_pstd = (selected_coefs + selected_coefs_std)[:, roi_idx].tolist()
+                _scores_mstd = (selected_coefs - selected_coefs_std)[:, roi_idx].tolist()
+                fig.add_trace(
+                    go.Scatterpolar(
+                        r=_scores + _scores[:1],
+                        theta=[
+                            "<b>" + short_clinical_names[dataset][name] + "</b>"
+                            for name in clinical_names + clinical_names[:1]],
+                        mode="lines+text",
+                        marker_color=color,
+                        line_width=2,
+                        legendgroup="roi",
+                        legendgrouptitle = dict(
+                            font=dict(
+                                size=textfont["size"] + 4,
+                                family=textfont["family"]),
+                            text="<b>ROIs</b>"),
+                        name=_roi))
+                fig.add_trace(
+                    go.Scatterpolar(
+                        r=_scores_pstd + _scores_pstd[:1],
+                        theta=[
+                            "<b>" + short_clinical_names[dataset][name] + "</b>"
+                            for name in clinical_names + clinical_names[:1]],
+                        mode="lines",
+                        marker_color=color,
+                        line_width=1,
+                        line_dash="dot",
+                        showlegend=False
+                    ))
+                        # legendgroup="roi",
+                        # legendgrouptitle = dict(
+                        #     font=dict(
+                        #         size=textfont["size"] + 4,
+                        #         family=textfont["family"]),
+                        #     text="<b>ROIs</b>"),
+                        # name=_roi))
+                fig.add_trace(
+                    go.Scatterpolar(
+                        r=_scores_mstd + _scores_mstd[:1],
+                        theta=[
+                            "<b>" + short_clinical_names[dataset][name] + "</b>"
+                            for name in clinical_names + clinical_names[:1]],
+                        mode="lines",
+                        marker_color=color,
+                        line_width=1,
+                        line_dash="dot",
+                        showlegend=False
+                    ))
+                        # legendgroup="roi",
+                        # legendgrouptitle = dict(
+                        #     font=dict(
+                        #         size=textfont["size"] + 4,
+                        #         family=textfont["family"]),
+                        #     text="<b>ROIs</b>"),
+                        # name=_roi))
+            # for marker, name, sign in [
+            #     (marker_non_signif, "non significative", False)]:
+            #     (marker_signif, "significative", True)]:
+            #     significative_scores = []
+            #     score_names = []
+            #     markers = []
+            #     for roi_idx, roi_coefs in enumerate(selected_coefs):
+            #         for coef_idx, coef in enumerate(roi_coefs):
+            #             if significativity[roi_idx][coef_idx] == sign:
+            #     for roi_idx, _roi in enumerate(selected_rois):
+            #         _scores = selected_coefs[:, roi_idx].tolist()
+            #             significative_scores.append(coef)
+            #         score_names.append(clinical_names)
+            #         markers.append(marker)
+            #         fig.add_trace(go.Scatterpolar(
+            #             r=np.array(_scores),
+            #             theta=np.array(["<b>" + short_clinical_names[dataset][name]
+            #                             + "</b>" for name in clinical_names]),
+            #             fill='toself',
+            #             mode="markers",
+            #             legendgroup="significativity",
+            #             legendgrouptitle = dict(
+            #                 font=dict(
+            #                     size=textfont["size"] + 4,
+            #                     family="Droid Serif"),
+            #                 text="<b>Significativity</b>"),
+            #             showlegend=False,
+            #             marker_symbol=marker,
+            #             marker_size=5,
+            #             marker_color="black",
+            #             name=name
+            #         ))
+            fig.update_layout(
+                polar=dict(
+                    radialaxis=dict(
+                        visible=True, showticklabels=False, ticks="",
+                        range=[0, (selected_coefs + selected_coefs_std).max() + 0.0005])),#(selected_coefs).max() + 0.003])),# (selected_coefs+ selected_coefs_std).max() + 0.003])),
+                font=textfont)
+            filename = os.path.join(
+                dirname, f"most_sigificant_rois_{_metric}_polarplots.png")
+            fig.write_image(filename)
+            print_result(f"{_metric} regression coefficients for most significant "
+                         f"ROIs: {filename}")
+    
+        filename = os.path.join(dirname, "most_significant_rois.png")
+        plot_areas(all_selected_rois, np.arange(len(all_selected_rois)), filename, color_name)
+
 
 def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
                           trust_level=0.7, vote_prop=1, rescaled=True):
@@ -977,7 +1201,136 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
             dirname, f"association_for_{score}_in_{metric}.png")
         plt.rcParams.update({'font.size': 20, "font.family": "serif"})
         plot_areas(areas, np.arange(len(areas)) + 0.01, filename_areas, color_name)
-        plot_coefs(areas, values, filename_bar, color_name)
+        plot_coefs(areas, values, filename=filename_bar, color_name=color_name)
+
+
+def daa_plot_score_metric_strongest(dataset, datasetdir, outdir, run, score,
+                                    metric, rescaled=True, n_rois=10,
+                                    use_coefficients=False):
+    """ Display specified score and metric associations
+    Parameters
+    ----------
+    dataset: str
+        the dataset name: euaims or hbn.
+    datasetdir: str
+        the path to the dataset associated data.
+    outdir: str
+        the destination folder.
+    run: str
+        the name of the experiment in the destination folder:
+        `<dataset>_<timestamp>'.
+    """
+    from plotting import plot_areas, plot_coefs
+    import matplotlib.pyplot as plt
+
+    print_title(f"PLOT DAA results: {dataset}")
+    expdir = os.path.join(outdir, run)
+    daadir = os.path.join(expdir, "daa")
+    print_text(f"experimental directory: {expdir}")
+    print_text(f"DAA directory: {daadir}")
+    simdirs = [path for path in glob.glob(os.path.join(daadir, "*"))
+               if os.path.isdir(path)]
+    print_text(f"Simulation directories: {','.join(simdirs)}")
+
+    flags_file = os.path.join(expdir, "flags.rar")
+    if not os.path.isfile(flags_file):
+        raise ValueError("You need first to train the model.")
+    checkpoints_dir = os.path.join(expdir, "checkpoints")
+    experiment, flags = MultimodalExperiment.get_experiment(
+        flags_file, checkpoints_dir)
+
+    clinical_names = np.load(
+        os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
+    clinical_names = clinical_names.tolist()
+    rois_names = np.load(
+        os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
+    metadata = pd.read_table(
+        os.path.join(datasetdir, "metadata_train.tsv"))
+    metadata_columns = metadata.columns.tolist()
+
+    # additional_data = SimpleNamespace(metadata_columns=metadata_columns,
+    #                                   clinical_names=clinical_names,
+    #                                   rois_names=rois_names)
+    rois_names = rois_names.tolist()
+    significativity_thr = 0.05 / len(clinical_names) / len(rois_names)
+    n_models = flags.num_models
+    scalers = experiment.scalers
+
+    for dirname in simdirs:
+        print_text(dirname)
+        if not os.path.exists(os.path.join(dirname, "coefs.npy")):
+            continue
+        coefs = np.load(os.path.join(dirname, "coefs.npy"))
+        pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
+
+        # n_validation = int(
+        #     dirname.split("n_validation_")[1].split("_n_s")[0])
+        # _, df = compute_significativity(
+        #     pvalues, trust_level, vote_prop, n_validation, additional_data,
+        #     correct_threshold=True)
+
+        average_pvalues = pvalues.mean((0, 1))
+        std_pvalues = pvalues.std((0, 1))
+        average_coefs = coefs.mean((0, 1))
+        std_coefs = coefs.std((0, 1))
+
+        rois = np.array(
+            list(set([name.rsplit("_", 1)[0] for name in rois_names])))
+
+        score_idx = clinical_names.index(score)
+        metric_indices = np.array(
+            [roi_idx for roi_idx, name in enumerate(rois_names)
+             if metric in name])
+        if use_coefficients:
+            most_significant_indices = np.argsort(
+                np.absolute(average_coefs[score_idx, metric_indices]))[::-1]
+        else:
+            most_significant_indices = np.argsort(
+                average_pvalues[score_idx, metric_indices])
+
+        rois_indices = most_significant_indices[:n_rois]
+        area_idx = metric_indices[rois_indices]
+        areas = np.array(rois_names)[area_idx]
+        areas = [area.rsplit("_", 1)[0] for area in areas]
+        values = average_coefs[score_idx, area_idx]
+        stds = std_coefs[score_idx, area_idx]
+
+        if rescaled:
+            scaling_factors = []
+            for roi_idx in area_idx:
+                if n_models > 1:
+                    scaling_factor = sum([
+                        scalers[i]["rois"].scale_[roi_idx] /
+                        scalers[i]["clinical"].scale_[score_idx]
+                        for i in range(n_models)]) / n_models
+                else:
+                    scaling_factor = (scalers["rois"].scale_[roi_idx] /
+                        scalers["clinical"].scale_[score_idx])
+                scaling_factors.append(scaling_factor)
+            scaling_factors = np.asarray(scaling_factors)
+            values *= scaling_factors
+            stds *= scaling_factors
+
+        print_subtitle(f"Plot regression coefficients ...")
+        color_name = "Plotly"
+        if len(areas) <= 6:
+            color_name = "tab10"
+        elif len(areas) <= 9:
+            color_name = "Plotly"
+        elif len(areas) <= 10:
+            color_name = "tab10"
+        elif len(areas) <= 12:
+            color_name = "Paired"
+        else:
+            color_name = "Alphabet"
+        print("Number of significative rois in thickness for {} : ".format(score), len(areas))
+        filename_areas = os.path.join(
+            dirname, f"strongest_associated_rois_for_{score}_in_{metric}.png")
+        filename_bar = os.path.join(
+            dirname, f"strongest_association_for_{score}_in_{metric}.png")
+        plt.rcParams.update({'font.size': 20, "font.family": "serif"})
+        plot_areas(areas, np.arange(len(areas)) + 0.01, filename_areas, color_name)
+        plot_coefs(areas, values, stds, filename_bar, color_name)
 
 
 def avatar_plot_exp(dataset, datasetdir, outdir, run):

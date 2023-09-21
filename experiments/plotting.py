@@ -260,12 +260,12 @@ def plot_areas(areas, colors, filename=None, color_name="Plotly", inflated=True)
         fig.savefig(filename)
     return fig
 
-def plot_coefs(bar_names, coefs, filename=None, color_name="Plotly"):
+def plot_coefs(bar_names, coefs, errors=None, filename=None, color_name="Plotly"):
     fig = plt.figure(figsize=(10, 7.5))
     ax = fig.add_subplot(111)
     colors = get_color_list(color_name, len(coefs))
     mymap = mcolors.ListedColormap(colors)
-    ax.barh(bar_names, coefs, color=[mymap(idx / len(colors)) for idx in range(len(coefs))])
+    ax.barh(bar_names, coefs, xerr=errors, color=[mymap(idx / len(colors)) for idx in range(len(coefs))])
     ax.tick_params(axis="y", which="both", length=0)
     ticks = ax.get_xticks()
     ticks = ticks[::2]
