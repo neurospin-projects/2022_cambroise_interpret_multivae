@@ -474,3 +474,45 @@ def compute_significativity(pvalues, trust_level, vote_prop, n_validation,
     if verbose:
         print(significant_assoc.groupby(["metric", "score"]).count())
     return idx_sign, significant_assoc
+
+def compute_stability(associations0, associations1, N_prior, eps=1e-8):
+    N0 = len(associations0)
+    N1 = len(associations1)
+    N01 = len([assoc for assoc in associations0 if assoc in associations1])
+    eps = 1e-8
+
+    # The two following formulations are equivalent
+    # stability = ((N01 / (N0 + eps) + N01 / (N1 + eps) ) / 
+    #              (N0 / (N01 + eps) + N1 / (N01 + eps) + eps))
+    stability = N01 * N01 / (N0 * N1 + eps)
+    penality = 2  / (N01 / N_prior + N_prior / (N01 + eps))
+    penalized_stability = stability * penality
+    return stability, penalized_stability
+
+
+def compute_all_stability(results, daa_params, heuristic, strat_param_name,
+                          ideal_N, metrics, scores):
+
+    res0 = results[0][daa_params][heuristic][strat_param_name]
+    res1 = results[1][daa_params][heuristic][strat_param_name]
+
+    all_assoc0 = list(zip(res0["score"], res0["metric"], res0["roi"]))
+    all_assoc1 = list(zip(res1["score"], res1["metric"], res1["roi"]))
+    
+    stability_per_score_metric = {
+        "daa_params": [], "heuristic": [], "strat_param": [], "metric": [],
+        "score": [], "stability": [], "penalized_stability": []}
+    for metric_idx, metric in enumerate(metrics):
+        for score_idx, score in enumerate(scores):
+            local_assoc0 = [assoc for assoc in all_assoc0 if metric in assoc and score in assoc]
+            local_assoc1 = [assoc for assoc in all_assoc1 if metric in assoc and score in assoc]
+            stability, penalized_stability = compute_stability(
+                local_assoc0, local_assoc1, ideal_N)
+            stability_per_score_metric["daa_params"].append(daa_params)
+            stability_per_score_metric["heuristic"].append(heuristic)
+            stability_per_score_metric["strat_param"].append(strat_param_name)
+            stability_per_score_metric["metric"].append(metric)
+            stability_per_score_metric["score"].append(score)
+            stability_per_score_metric["stability"].append(stability)
+            stability_per_score_metric["penalized_stability"].append(penalized_stability)
+    return stability_per_score_metric

@@ -579,6 +579,56 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_subjects=301,
         print(df.groupby(["score"]).apply(lambda e: e[:]))
 
 
+def score_models(dataset, datasetdir, outdir, run, scores=None, latent_name="joint"):
+    """ Perform Representational Similarity Analysis (RSA) on estimated
+    latent representations.
+    Parameters
+    ----------
+    dataset: str
+        the dataset name: euaims or hbn.
+    datasetdir: str
+        the path to the dataset associated data.
+    outdir: str
+        the destination folder.
+    run: str
+        the name of the experiment in the destination folder:
+        `<dataset>_<timestamp>'.
+    n_validation: int, default 50
+        the number of times we repeat the experiments.
+    n_subjects: int, default 50
+        the number of samples for each clinical score used to compute the
+        (dis)similarity matrices.
+    seed: int, default 1037
+        optionally specify a seed to control expriment reproducibility, set
+        to None for randomization.
+    """
+    import matplotlib.pyplot as plt
+    expdir = os.path.join(outdir, run)
+    rsadir = os.path.join(expdir, "rsa")
+
+    if not os.path.exists(rsadir):
+        raise ValueError("You must first run rsa n your models to score them.")
+    
+    clinical_names = np.load(
+        os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
+    clinical_names = clinical_names.tolist()
+    if scores is None:
+        scores = clinical_names
+    
+    kendalltaus = np.load(os.path.join(rsadir, "kendalltau_stats.npy"))
+    score_indices = [clinical_names.index(score) for score in scores]
+    latent_names = ["joint", "clinical_rois", "clinical_style", "rois_style"]
+    score_per_model = kendalltaus[:, :, :, score_indices, 0]
+    score_per_model = score_per_model.mean(axis=(-2, -1))
+    score_per_model = score_per_model[:, latent_names.index(latent_name)]
+    # ordered_score = np.argsort(score_per_model)
+    # for n_worst in range(0, 20):
+    #     print(f"{n_worst}th worst score : {score_per_model[ordered_score[n_worst]]}")
+    # plt.hist(score_per_model, bins=15)
+    # plt.show()
+    return score_per_model
+
+
 def hist_plot_exp(datasets, datasetdirs, scores, outdir):
     """ Display specified score histogram across different cohorts.
     Parameters
