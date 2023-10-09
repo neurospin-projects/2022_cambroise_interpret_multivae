@@ -333,7 +333,7 @@ def combine_all_pvalues(pvalues, method="fisher"):
 
 
 def compute_associations(dataset, datasetdir, outdir, runs,
-                         heuristics, heuristics_params,
+                         heuristics_params,
                          metrics=["thickness", "meancurv", "area"],
                          scores=None, model_indices=None, 
                          validation_indices=None, n_subjects=150):
@@ -420,16 +420,16 @@ def compute_associations(dataset, datasetdir, outdir, runs,
             std_coefs = coefs.std((0, 1))
 
             other_agg_pvalues = {}
-            combine_pvalues_heuristics = [heuristic for heuristic in heuristics
+            combine_pvalues_heuristics = [heuristic for heuristic in heuristics_params.keys()
                                           if "pvalues_combine" in heuristic]
             for heuristic in combine_pvalues_heuristics:
                 method = heuristic.split("combine_")[-1]
                 other_agg_pvalues[method] = combine_all_pvalues(pvalues, method)
             
-            if "pvalues_coefs" in heuristics:
+            if "pvalues_coefs" in heuristics_params:
                 other_agg_pvalues["coefs"] = non_nullity_coef(coefs)
             
-            weighted_mean_heuristics = [heuristic for heuristic in heuristics
+            weighted_mean_heuristics = [heuristic for heuristic in heuristics_params.keys()
                                         if "weighted_mean" in heuristic]
             if len(weighted_mean_heuristics) != 0:
                 model_scores = score_models(dataset, datasetdir, outdir, run,
@@ -452,7 +452,7 @@ def compute_associations(dataset, datasetdir, outdir, runs,
                     weights = weights / weights.sum()            
                     other_agg_pvalues[method] = np.average(
                         coefs.mean(1), axis=0, weights=weights)
-            if "pvalues_vote" in heuristics:
+            if "pvalues_vote" in heuristics_params:
                 dir_results["pvalues_vote"] = {}
                 for trust_level, vote_prop in itertools.product(
                     heuristics_params["pvalues_vote"]["vote_prop"],
@@ -472,7 +472,7 @@ def compute_associations(dataset, datasetdir, outdir, runs,
                     metric_indices = np.array(
                         [roi_idx for roi_idx, name in enumerate(rois_names)
                         if metric in name])
-                    for heuristic in heuristics:
+                    for heuristic in heuristics_params.keys():
                         higher_is_better = False
                         if "strategy" in heuristics_params[heuristic]:
                             if heuristic.startswith("coefs"):
@@ -568,36 +568,28 @@ def compute_associations(dataset, datasetdir, outdir, runs,
 
 def evaluate_stability(dataset, datasetdir, outdir, runs=[],
                        metrics=["thickness", "meancurv", "area"],
-                       scores=None, select_good_models=False,
+                       scores=None, select_good_models=0,
                        n_subjects=150):
     assert len(runs) == 2
-    heuristics = ["pvalues_vote", "pvalues_min", "pvalues_mean",
-                  "coefs_mean", "coefs_max", 
-                  "coefs_weighted_mean_score", "coefs_weighted_mean_rank",
-                  "coefs_weighted_mean_score_softmax", "coefs_weighted_mean_rank_softmax",
-                  "coefs_weighted_mean_score_log"]
-                #"pvalues_combine_fisher", "pvalues_coefs", "pvalues_prod", 
-                #   "pvalues_combine_pearson", "pvalues_combine_tippett",
-                #   "pvalues_combine_stouffer"]#, "composite"]
     heuristics_params = {
         "pvalues_vote": {"vote_prop": [0.95, 1], "trust_level": [0.95, 1]},
         # "pvalues_prod": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [5e-3, 1e-5, 1e-20, 1e-50, 1e-100], "var": [1, 0.5, 0.25]},
-        "pvalues_min": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        "pvalues_min": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
         # "pvalues_coefs": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 50)), "thr": [1e-250, 1e-200, 1e-150, 1e-100, 1e-50, 1e-20], "var": [1, 0.5, 0.25]},
         # "pvalues_combine_fisher": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 30)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
         # "pvalues_combine_pearson": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 30)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
         # "pvalues_combine_tippett": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 30)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
         # "pvalues_combine_stouffer": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 30)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
         # "pvalues_combine_mudholkar_george": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 30)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
-        "pvalues_mean": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [1e-3, 1e-5, 1e-8], "var": [1, 0.5, 0.25]},
-        "coefs_mean": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
-        "coefs_max": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [1e-3, 1e-5, 1e-8], "var": [1, 0.5, 0.25]},
+        "pvalues_mean": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-3, 1e-5, 1e-8], "var": [1, 0.5, 0.25]},
+        "coefs_mean": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        "coefs_max": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-3, 1e-5, 1e-8], "var": [1, 0.5, 0.25]},
         #"composite": {"strategy": ["thr", "num", "var"], "num": [10], "thr": [1e-10]}
-        "coefs_weighted_mean_score": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
-        "coefs_weighted_mean_rank": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
-        "coefs_weighted_mean_score_softmax": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
-        "coefs_weighted_mean_rank_softmax": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
-        "coefs_weighted_mean_score_log": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        # "coefs_weighted_mean_score": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        # "coefs_weighted_mean_rank": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        # "coefs_weighted_mean_score_softmax": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        # "coefs_weighted_mean_rank_softmax": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        # "coefs_weighted_mean_score_log": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
     }
 
     import matplotlib.pyplot as plt
@@ -620,180 +612,215 @@ def evaluate_stability(dataset, datasetdir, outdir, runs=[],
                                     rois_names=rois_names)
 
     model_indices = None
-    if select_good_models:
-        n_worsts_to_remove = 5
+    # Computing heuristics with various parameters for each metric / score
+    global_result = compute_associations(dataset, datasetdir, outdir, runs,
+                                          heuristics_params,
+                                          metrics, scores, model_indices,
+                                          n_subjects=n_subjects)
+    global_results = [global_result]
+    if select_good_models > 0:
+
         model_indices = []
         for run in runs:
             model_indices.append(list(range(50)))
             model_scores = score_models(dataset, datasetdir, outdir, run, scores=scores)
-            worst_models = np.argsort(model_scores)[:n_worsts_to_remove]
+            worst_models = np.argsort(model_scores)[:select_good_models]
             for model_idx in worst_models:
                 model_indices[-1].remove(model_idx)
         model_indices = np.array(model_indices).T
-        # n_params -= n_worsts_to_remove
+        global_result_select = compute_associations(dataset, datasetdir, outdir,
+                                                    runs, heuristics_params,
+                                                    metrics, scores, model_indices,
+                                                    n_subjects=n_subjects)
 
-    # Computing heuristics with various parameters for each metric / score
-    global_results = compute_associations(dataset, datasetdir, outdir, runs,
-                                          heuristics, heuristics_params,
-                                          metrics, scores, model_indices,
-                                          n_subjects=n_subjects)
+        heuristics_params.update({
+            "coefs_weighted_mean_score": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+            "coefs_weighted_mean_rank": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+            # "coefs_weighted_mean_score_softmax": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+            # "coefs_weighted_mean_rank_softmax": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+            # "coefs_weighted_mean_score_log": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+            })
+        global_result_new = compute_associations(dataset, datasetdir, outdir, runs,
+                                                heuristics_params,
+                                                metrics, scores, None,
+                                                n_subjects=n_subjects)
+        global_results.append(global_result_select)
+        global_results.append(global_result_new)
 
 
     # Computing stability
-    ideal_Ns = np.array(list(range(1, 25)))#np.sqrt(len(rois))
+    ideal_Ns = np.array(list(range(1, 21)))#np.sqrt(len(rois))
 
-    best_values = {"stability" : np.empty(len(ideal_Ns)),
-                   "penalized_stability": np.empty(len(ideal_Ns)),
-                   "heuristic": np.empty(len(ideal_Ns), dtype=object),
-                   "strat_param" : np.empty(len(ideal_Ns), dtype=object),
-                   "daa_params": np.empty(len(ideal_Ns), dtype=object)}
+    best_values = {"stability" : np.empty((len(global_results), len(ideal_Ns))),
+                   "penalized_stability": np.empty((len(global_results), len(ideal_Ns))),
+                   "heuristic": np.empty((len(global_results), len(ideal_Ns)), dtype=object),
+                   "strat_param" : np.empty((len(global_results), len(ideal_Ns)), dtype=object),
+                   "daa_params": np.empty((len(global_results), len(ideal_Ns)), dtype=object)}
 
     best_values_per_metric_score = {
-        "stability" : np.zeros((len(metrics), len(scores), len(ideal_Ns))),
-        "penalized_stability": np.zeros((len(metrics), len(scores), len(ideal_Ns))),
-        "heuristic": np.empty((len(metrics), len(scores), len(ideal_Ns)), dtype=object),
-        "strat_param" : np.empty((len(metrics), len(scores), len(ideal_Ns)), dtype=object),
-        "daa_params": np.empty((len(metrics), len(scores), len(ideal_Ns)), dtype=object)
+        "stability" : np.zeros((len(metrics), len(scores), len(global_results), len(ideal_Ns))),
+        "penalized_stability": np.zeros((len(metrics), len(scores), len(global_results), len(ideal_Ns))),
+        "heuristic": np.empty((len(metrics), len(scores), len(global_results), len(ideal_Ns)), dtype=object),
+        "strat_param" : np.empty((len(metrics), len(scores), len(global_results), len(ideal_Ns)), dtype=object),
+        "daa_params": np.empty((len(metrics), len(scores), len(global_results), len(ideal_Ns)), dtype=object)
     }
 
     best_values_per_metric = {
-        "stability" : np.zeros((len(metrics), len(ideal_Ns))),
-        "penalized_stability": np.zeros((len(metrics), len(ideal_Ns))),
-        "heuristic": np.empty((len(metrics), len(ideal_Ns)), dtype=object),
-        "strat_param" : np.empty((len(metrics), len(ideal_Ns)), dtype=object),
-        "daa_params": np.empty((len(metrics), len(ideal_Ns)), dtype=object)
+        "stability" : np.zeros((len(metrics), len(global_results), len(ideal_Ns))),
+        "penalized_stability": np.zeros((len(metrics), len(global_results), len(ideal_Ns))),
+        "heuristic": np.empty((len(metrics), len(global_results), len(ideal_Ns)), dtype=object),
+        "strat_param" : np.empty((len(metrics), len(global_results), len(ideal_Ns)), dtype=object),
+        "daa_params": np.empty((len(metrics), len(global_results), len(ideal_Ns)), dtype=object)
     }
 
     best_values_per_score = {
-        "stability" : np.zeros((len(scores), len(ideal_Ns))),
-        "penalized_stability": np.zeros((len(scores), len(ideal_Ns))),
-        "heuristic": np.empty((len(scores), len(ideal_Ns)), dtype=object),
-        "strat_param" : np.empty((len(scores), len(ideal_Ns)), dtype=object),
-        "daa_params": np.empty((len(scores), len(ideal_Ns)), dtype=object)
+        "stability" : np.zeros((len(scores), len(global_results), len(ideal_Ns))),
+        "penalized_stability": np.zeros((len(scores), len(global_results), len(ideal_Ns))),
+        "heuristic": np.empty((len(scores), len(global_results), len(ideal_Ns)), dtype=object),
+        "strat_param" : np.empty((len(scores), len(global_results), len(ideal_Ns)), dtype=object),
+        "daa_params": np.empty((len(scores), len(global_results), len(ideal_Ns)), dtype=object)
     }
 
     variables = list(best_values.keys())
 
     # Compute penalized stability for each ideal_N value
-    for N_idx, ideal_N in enumerate(ideal_Ns):
-        stability_per_score_metric = {
-            "daa_params": [], "heuristic": [], "strat_param": [], "metric": [],
-            "score": [], "stability": [], "penalized_stability": []}
-        for daa_params in set(list(global_results[0].keys())).intersection(global_results[1].keys()):
-            for heuristic in heuristics:
-                if "strategy" in heuristics_params[heuristic]:
-                    for strategy in heuristics_params[heuristic]["strategy"]:
-                        if "-" not in strategy:
-                            for strat_param in heuristics_params[heuristic][strategy]:
-                                strat_param_name = f"strategy_{strategy}_value_{strat_param}"
+    for result_idx, result in enumerate(global_results):
+        for N_idx, ideal_N in enumerate(ideal_Ns):
+            stability_per_score_metric = {
+                "daa_params": [], "heuristic": [], "strat_param": [], "metric": [],
+                "score": [], "stability": [], "penalized_stability": []}
+            for daa_params in set(list(result[0].keys())).intersection(result[1].keys()):
+                for heuristic in heuristics_params.keys():
+                    if not heuristic in result[0][daa_params]:
+                        continue
+                    if "strategy" in heuristics_params[heuristic]:
+                        for strategy in heuristics_params[heuristic]["strategy"]:
+                            if "-" not in strategy:
+                                for strat_param in heuristics_params[heuristic][strategy]:
+                                    strat_param_name = f"strategy_{strategy}_value_{strat_param}"
 
-                                local_stability_per_metric_score = (
-                                    compute_all_stability(global_results,
-                                                          daa_params,
-                                                          heuristic,
-                                                          strat_param_name,
-                                                          ideal_N, metrics,
-                                                          scores))
-                                for key, value in stability_per_score_metric.items():
-                                    value += local_stability_per_metric_score[key]
+                                    local_stability_per_metric_score = (
+                                        compute_all_stability(result,
+                                                            daa_params,
+                                                            heuristic,
+                                                            strat_param_name,
+                                                            ideal_N, metrics,
+                                                            scores))
+                                    for key, value in stability_per_score_metric.items():
+                                        value += local_stability_per_metric_score[key]
 
-                        else:
-                            second_param = strategy.split("-")[1]
-                            for num, other_param in itertools.product(heuristics_params[heuristic]["num"],
-                                                            heuristics_params[heuristic][second_param]):
-                                strat_param_name = f"strategy_{strategy}_values_{num}_{other_param}"
+                            else:
+                                second_param = strategy.split("-")[1]
+                                for num, other_param in itertools.product(heuristics_params[heuristic]["num"],
+                                                                heuristics_params[heuristic][second_param]):
+                                    strat_param_name = f"strategy_{strategy}_values_{num}_{other_param}"
 
-                                local_stability_per_metric_score = (
-                                    compute_all_stability(global_results,
-                                                          daa_params,
-                                                          heuristic,
-                                                          strat_param_name,
-                                                          ideal_N, metrics,
-                                                          scores))
-                                for key, value in stability_per_score_metric.items():
-                                    value += local_stability_per_metric_score[key]
-                else:
-                    for trust_level, vote_prop in itertools.product(
-                        heuristics_params["pvalues_vote"]["vote_prop"],
-                        heuristics_params["pvalues_vote"]["trust_level"]):
+                                    local_stability_per_metric_score = (
+                                        compute_all_stability(result,
+                                                            daa_params,
+                                                            heuristic,
+                                                            strat_param_name,
+                                                            ideal_N, metrics,
+                                                            scores))
+                                    for key, value in stability_per_score_metric.items():
+                                        value += local_stability_per_metric_score[key]
+                    else:
+                        for trust_level, vote_prop in itertools.product(
+                            heuristics_params["pvalues_vote"]["vote_prop"],
+                            heuristics_params["pvalues_vote"]["trust_level"]):
 
-                        strat_param_name = f"vote_prop_{vote_prop}_trust_level_{trust_level}"
+                            strat_param_name = f"vote_prop_{vote_prop}_trust_level_{trust_level}"
 
-                        local_stability_per_metric_score = (
-                            compute_all_stability(global_results, daa_params,
-                                                  heuristic, strat_param_name,
-                                                  ideal_N, metrics, scores))
-                        for key, value in stability_per_score_metric.items():
-                            value += local_stability_per_metric_score[key]
+                            local_stability_per_metric_score = (
+                                compute_all_stability(result, daa_params,
+                                                    heuristic, strat_param_name,
+                                                    ideal_N, metrics, scores))
+                            for key, value in stability_per_score_metric.items():
+                                value += local_stability_per_metric_score[key]
 
-        stability_per_score_metric = pd.DataFrame.from_dict(stability_per_score_metric)
-        # print(stability_per_score_metric.sort_values("penalized_stability", ascending=False))
-        # print(final_stability.sort_values("penalized_stability", ascending=False))
+            stability_per_score_metric = pd.DataFrame.from_dict(stability_per_score_metric)
+            # print(stability_per_score_metric.sort_values("penalized_stability", ascending=False))
+            # print(final_stability.sort_values("penalized_stability", ascending=False))
 
-        # Compute best values per (metric, score), metric and score w.r.t.
-        # penalized stability
-        for metric_idx, metric in enumerate(metrics):
-            for score_idx, score in enumerate(scores):
-                idx = ((stability_per_score_metric["metric"] == metric) &
-                    (stability_per_score_metric["score"] == score))
-                local_stability = stability_per_score_metric[idx]
+            # Compute best values per (metric, score), metric and score w.r.t.
+            # penalized stability
+            for metric_idx, metric in enumerate(metrics):
+                for score_idx, score in enumerate(scores):
+                    idx = ((stability_per_score_metric["metric"] == metric) &
+                        (stability_per_score_metric["score"] == score))
+                    local_stability = stability_per_score_metric[idx]
+                    sorted_local_stability = local_stability.sort_values(
+                        "penalized_stability", ascending=False)
+                    for variable in variables:
+                        best_values_per_metric_score[variable][
+                            metric_idx, score_idx, result_idx, N_idx] = (
+                            sorted_local_stability[variable].to_list()[0])
+
+            final_stability = stability_per_score_metric.groupby(
+                ["daa_params", "heuristic", "strat_param"],
+                as_index=False).mean()
+            sorted_stability = final_stability.sort_values(
+                "penalized_stability", ascending=False)
+            for variable in variables:
+                best_values[variable][result_idx, N_idx] = (
+                    sorted_stability[variable].to_list()[0])
+            sorted_stability = stability_per_score_metric.groupby(
+                    ["daa_params", "heuristic", "strat_param"],
+                    as_index=False).mean()
+
+            for metric_idx, metric in enumerate(metrics):
+                idx = (stability_per_score_metric["metric"] == metric)
+                local_stability = stability_per_score_metric[idx].groupby(
+                    ["daa_params", "heuristic", "strat_param", "metric"],
+                    as_index=False).mean()
                 sorted_local_stability = local_stability.sort_values(
                     "penalized_stability", ascending=False)
                 for variable in variables:
-                    best_values_per_metric_score[variable][
-                        metric_idx, score_idx, N_idx] = (
+                    best_values_per_metric[variable][metric_idx, result_idx, N_idx] = (
                         sorted_local_stability[variable].to_list()[0])
 
-        final_stability = stability_per_score_metric.groupby(
-            ["daa_params", "heuristic", "strat_param"],
-            as_index=False).mean()
-        sorted_stability = final_stability.sort_values(
-            "penalized_stability", ascending=False)
-        for variable in variables:
-            best_values[variable][N_idx] = (
-                sorted_stability[variable].to_list()[0])
-        sorted_stability = stability_per_score_metric.groupby(
-                ["daa_params", "heuristic", "strat_param"],
-                as_index=False).mean()
-
-        for metric_idx, metric in enumerate(metrics):
-            idx = (stability_per_score_metric["metric"] == metric)
-            local_stability = stability_per_score_metric[idx].groupby(
-                ["daa_params", "heuristic", "strat_param", "metric"],
-                as_index=False).mean()
-            sorted_local_stability = local_stability.sort_values(
-                "penalized_stability", ascending=False)
-            for variable in variables:
-                best_values_per_metric[variable][metric_idx, N_idx] = (
-                    sorted_local_stability[variable].to_list()[0])
-
-        for score_idx, score in enumerate(scores):
-            idx = (stability_per_score_metric["score"] == score)
-            local_stability = stability_per_score_metric[idx].groupby(
-                ["daa_params", "heuristic", "strat_param", "score"],
-                as_index=False).mean()
-            sorted_local_stability = local_stability.sort_values(
-                "penalized_stability", ascending=False)
-            for variable in variables:
-                best_values_per_score[variable][score_idx, N_idx] = (
-                    sorted_local_stability[variable].to_list()[0])
+            for score_idx, score in enumerate(scores):
+                idx = (stability_per_score_metric["score"] == score)
+                local_stability = stability_per_score_metric[idx].groupby(
+                    ["daa_params", "heuristic", "strat_param", "score"],
+                    as_index=False).mean()
+                sorted_local_stability = local_stability.sort_values(
+                    "penalized_stability", ascending=False)
+                for variable in variables:
+                    best_values_per_score[variable][score_idx, result_idx, N_idx] = (
+                        sorted_local_stability[variable].to_list()[0])
     
     # Plot stability for each case
     plot_stability = True
     plot_heuristic_hist = False
     if plot_stability:
-        plt.plot(ideal_Ns, best_values["stability"], label="raw")
-        plt.plot(ideal_Ns, best_values["penalized_stability"], label="penalized")
-        plt.legend(title="Stability")
-        plt.title("Best stability when varying N*")
+        fig, ax = plt.subplots(figsize=(12, 9))
+        handles = []
+        handle = ax.plot(ideal_Ns, best_values["stability"][0], label="all models", c="blue")
+        ax.plot(ideal_Ns, best_values["penalized_stability"][0], c="blue", ls="--")
+        handles += handle
+        if select_good_models > 0:
+            handle = ax.plot(ideal_Ns, best_values["stability"][1], label="without 2 worst models", c="orange")
+            ax.plot(ideal_Ns, best_values["penalized_stability"][1], c="orange", ls="--")
+            handles += handle
+            handle = ax.plot(ideal_Ns, best_values["stability"][2], label="with heuristics using score", c="green")
+            ax.plot(ideal_Ns, best_values["penalized_stability"][2], c="green", ls="--")
+            handles += handle
+        line_stab = lines.Line2D([0], [0], label='raw', color='k', ls="-")
+        line_pen_stab = lines.Line2D([0], [0], label='penalized', color='k', ls="--")
+
+        first_legend = ax.legend(handles=handles, loc='lower right', title="Setting")
+        ax.add_artist(first_legend)
+        ax.legend(handles=[line_stab, line_pen_stab], title="Stability", loc="upper right")
+        ax.set_title("Best stability when varying N*")
         for metric_idx, metric in enumerate(metrics):
             fig, ax = plt.subplots(figsize=(12, 9))
             ax.set_title(f"Stability for {metric}")
             handles = []
             for score_idx, score in enumerate(scores):
-                handle = ax.plot(ideal_Ns, best_values_per_metric_score["stability"][metric_idx, score_idx],
+                handle = ax.plot(ideal_Ns, best_values_per_metric_score["stability"][metric_idx, score_idx, 0],
                                 label=score, ls="-", c=list(colors.TABLEAU_COLORS)[score_idx])
-                ax.plot(ideal_Ns, best_values_per_metric_score["penalized_stability"][metric_idx, score_idx],
+                ax.plot(ideal_Ns, best_values_per_metric_score["penalized_stability"][metric_idx, score_idx, 0],
                         ls="--", c=list(colors.TABLEAU_COLORS)[score_idx])
                 handles += handle
             
@@ -801,9 +828,9 @@ def evaluate_stability(dataset, datasetdir, outdir, runs=[],
             line_stab = lines.Line2D([0], [0], label='raw', color='k', ls="-")
             line_pen_stab = lines.Line2D([0], [0], label='penalized', color='k', ls="--")
 
-            handle = ax.plot(ideal_Ns, best_values_per_metric["stability"][metric_idx],
+            handle = ax.plot(ideal_Ns, best_values_per_metric["stability"][metric_idx, 0],
                             label="Average", ls="-", c="k", lw=3)
-            ax.plot(ideal_Ns, best_values_per_metric["penalized_stability"][metric_idx],
+            ax.plot(ideal_Ns, best_values_per_metric["penalized_stability"][metric_idx, 0],
                         ls="--", c="k", lw=3)
             handles += handle
 
@@ -817,9 +844,9 @@ def evaluate_stability(dataset, datasetdir, outdir, runs=[],
             ax.set_title(f"Stability for {score}")
             handles = []
             for metric_idx, metric in enumerate(metrics):
-                handle = ax.plot(ideal_Ns, best_values_per_metric_score["stability"][metric_idx, score_idx],
+                handle = ax.plot(ideal_Ns, best_values_per_metric_score["stability"][metric_idx, score_idx, 0],
                                  label=metric, ls="-", c=list(colors.TABLEAU_COLORS)[metric_idx])
-                ax.plot(ideal_Ns, best_values_per_metric_score["penalized_stability"][metric_idx, score_idx],
+                ax.plot(ideal_Ns, best_values_per_metric_score["penalized_stability"][metric_idx, score_idx, 0],
                         ls="--", c=list(colors.TABLEAU_COLORS)[metric_idx])
                 handles += handle
 
@@ -827,9 +854,9 @@ def evaluate_stability(dataset, datasetdir, outdir, runs=[],
             line_stab = lines.Line2D([0], [0], label='raw', color='k', ls="-")
             line_pen_stab = lines.Line2D([0], [0], label='penalized', color='k', ls="--")
 
-            handle = ax.plot(ideal_Ns, best_values_per_score["stability"][score_idx],
+            handle = ax.plot(ideal_Ns, best_values_per_score["stability"][score_idx, 0],
                             label="Average", ls="-", c="k", lw=3)
-            ax.plot(ideal_Ns, best_values_per_score["penalized_stability"][score_idx],
+            ax.plot(ideal_Ns, best_values_per_score["penalized_stability"][score_idx, 0],
                         ls="--", c="k", lw=3)
             handles += handle
             
@@ -861,7 +888,7 @@ def evaluate_stability(dataset, datasetdir, outdir, runs=[],
             (-1, best_values_per_metric_score["strat_param"].shape[-1])))
         plt.xticks(rotation = 315)
         plt.subplots_adjust(bottom=0.3)
-
+    plt.show()
     # Print best result for each case
 
     # for metric_idx, metric in enumerate(metrics):
@@ -952,32 +979,25 @@ def evaluate_stability_scaling(dataset, datasetdir, outdir, runs=[],
                                scores=None, vary_models=True, n_subjects=150,
                                scaling_params=None, select_good_models=0):
     assert len(runs) == 2
-    heuristics = ["pvalues_vote", "pvalues_min", "pvalues_mean",
-                  "coefs_max", "coefs_mean"]#,
-                #   "coefs_weighted_mean_score", "coefs_weighted_mean_rank"]
-                #, "pvalues_combine_fisher", "pvalues_coefs", "pvalues_prod",
-                #   "pvalues_combine_pearson", "pvalues_combine_tippett",
-                #   "pvalues_combine_stouffer"]#, "composite"]
     heuristics_params = {
         "pvalues_vote": {"vote_prop": [0.95, 1], "trust_level": [0.95, 1]},
         # "pvalues_prod": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [5e-3, 1e-5, 1e-20, 1e-50, 1e-100], "var": [1, 0.5, 0.25]},
-        "pvalues_min": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
-        # "pvalues_coefs": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [1e-250, 1e-200, 1e-150, 1e-100, 1e-50, 1e-20], "var": [1, 0.5, 0.25]},
-        # "pvalues_combine_fisher": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 30)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
-        # "pvalues_combine_pearson": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 30)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
-        # "pvalues_combine_tippett": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 30)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
-        # "pvalues_combine_stouffer": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 30)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
-        # "pvalues_combine_mudholkar_george": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 30)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
-        "pvalues_mean": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [1e-3, 1e-5, 1e-8], "var": [1, 0.5, 0.25]},
-        "coefs_mean": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
-        "coefs_max": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [1e-3, 1e-5, 1e-8], "var": [1, 0.5, 0.25]},
-        "coefs_weighted_mean_score": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
-        "coefs_weighted_mean_rank": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 30)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        "pvalues_min": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        # "pvalues_coefs": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-250, 1e-200, 1e-150, 1e-100, 1e-50, 1e-20], "var": [1, 0.5, 0.25]},
+        # "pvalues_combine_fisher": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 25)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        # "pvalues_combine_pearson": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 25)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        # "pvalues_combine_tippett": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 25)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        # "pvalues_combine_stouffer": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 25)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        # "pvalues_combine_mudholkar_george": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 25)), "thr": [5e-2, 1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        "pvalues_mean": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-3, 1e-5, 1e-8], "var": [1, 0.5, 0.25]},
+        "coefs_mean": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        "coefs_max": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-3, 1e-5, 1e-8], "var": [1, 0.5, 0.25]},
+        # "coefs_weighted_mean_score": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
+        # "coefs_weighted_mean_rank": {"strategy": ["thr", "num", "var", "num-var", "num-thr"], "num": list(range(1, 25)), "thr": [1e-5, 1e-8, 1e-10], "var": [1, 0.5, 0.25]},
         
         #"composite": {"strategy": ["thr", "num", "var"], "num": [10], "thr": [1e-10]}
     }
 
-    # heuristics = ["coefs_mean"]
     # heuristics_params = {
     #     "coefs_mean": {"strategy": ["num-var"], "num": [17], "var": [0.25]},
     # }
@@ -1039,7 +1059,7 @@ def evaluate_stability_scaling(dataset, datasetdir, outdir, runs=[],
                 validation_indices = scaling_params[:param_idx]
                 model_indices = None
         global_results = compute_associations(dataset, datasetdir, outdir, runs,
-                                              heuristics, heuristics_params,
+                                              heuristics_params,
                                               metrics, scores, model_indices=model_indices,
                                               validation_indices=validation_indices,
                                               n_subjects=n_subjects)
@@ -1047,7 +1067,7 @@ def evaluate_stability_scaling(dataset, datasetdir, outdir, runs=[],
 
 
     # Computing stability
-    ideal_Ns = np.array(list(range(1, 25))) # np.sqrt(len(rois))
+    ideal_Ns = np.array(list(range(1, 21))) # np.sqrt(len(rois))
 
     best_values = {"stability" : np.empty((n_params, len(ideal_Ns))),
                    "penalized_stability": np.empty((n_params, len(ideal_Ns))),
@@ -1091,7 +1111,7 @@ def evaluate_stability_scaling(dataset, datasetdir, outdir, runs=[],
                 "penalized_stability": []}
             for daa_params in set(list(global_results[0].keys())).intersection(
                 global_results[1].keys()):
-                for heuristic in heuristics:
+                for heuristic in heuristics_params.keys():
                     if "strategy" in heuristics_params[heuristic]:
                         for strategy in heuristics_params[heuristic]["strategy"]:
                             if "-" not in strategy:
@@ -1441,11 +1461,6 @@ def study_heuristics(dataset, datasetdir, outdir, runs=[],
                      metrics=["thickness", "meancurv", "area"],
                      scores=None):
     assert len(runs) == 2
-    heuristics = [#"pvalues_vote", "pvalues_min", "pvalues_mean",
-                  #"coefs_mean", "coefs_max",
-                  "pvalues_combine_fisher",
-                  "pvalues_combine_pearson", "pvalues_combine_tippett",
-                  "pvalues_combine_stouffer"]#, "composite"]
     heuristics_params = {
         # "pvalues_vote": {"vote_prop": [0.95, 1], "trust_level": [0.95, 1]},
         # "pvalues_prod": {"strategy": ["thr", "num", "var", "num-var"], "num": list(range(1, 30)), "thr": [5e-3, 1e-5, 1e-20, 1e-50, 1e-100], "var": [1, 0.5, 0.25]},
@@ -1477,6 +1492,7 @@ def study_heuristics(dataset, datasetdir, outdir, runs=[],
 
 
     # Computing heuristics with various parameters for each metric / score
+    values_to_plot = []
     for run in runs:
         run_results = {}
         expdir = os.path.join(outdir, run)
@@ -1498,7 +1514,7 @@ def study_heuristics(dataset, datasetdir, outdir, runs=[],
             sampling = dirname.split("sampling_")[1].split("_sample")[0]
             sample_latent = dirname.split("latents_")[1].split("_seed")[0]
             n_subjects = int(dirname.split("subjects_")[1].split("_M")[0])
-            if f"{sampling}_{sample_latent}" != daa_params or n_subjects != 150:
+            if f"{sampling}_{sample_latent}" != daa_params or n_subjects != 301:
                 continue
 
             # Aggregation
@@ -1522,6 +1538,7 @@ def study_heuristics(dataset, datasetdir, outdir, runs=[],
                     if value == 0:
                         print(score, metric)
             x = combined_pvalues.flatten()
+            x = pvalues.flatten()
                 # print(x.tolist()[:10])
                 # print(np.sort(x).tolist()[:10])
             print("Combine pvalues stats")
@@ -1538,11 +1555,14 @@ def study_heuristics(dataset, datasetdir, outdir, runs=[],
             # # Use non-equal bin sizes, such that they look equal on log scale.
             # logbins = np.logspace(np.log10(x[x != 0].min()),np.log10(bins[-1]),len(bins))
             # plt.subplot(212)
-            plt.figure()
-            plt.hist(x[x != 0], bins=np.power(10, bins))#logbins)
-            plt.xscale('log')
-            plt.title(f"Combine coefs pvalues histogram for run {run} with {daa_params}")
-            plt.xlabel("log10 pvalues")                
+            # plt.figure()
+            values_to_plot.append((run, x[x != 0]))
+            # plt.hist(x[x != 0], bins=np.power(10, bins), label=f"{run}", stacked=True, edgecolor="white")#logbins)
+            # plt.xscale('log')
+            # plt.title(f"Combine coefs pvalues histogram for run {run} with {daa_params}")
+            # plt.title("Histogram of pvalues")
+            # plt.legend(title="Run")
+            # plt.xlabel("log10 pvalues")
             # for heuristic in combine_pvalues_heuristics:
             #     method = heuristic.split("combine_")[-1]
             #     x = combine_all_pvalues(pvalues.astype("double"), method).flatten()
@@ -1567,4 +1587,21 @@ def study_heuristics(dataset, datasetdir, outdir, runs=[],
                 # plt.title(f"Combine {method} pvalues histogram for run {run} with {daa_params}")
                 # plt.xlabel("log10 pvalues")                
                 # plt.hist(np.log10(other_agg_pvalues[method].flatten()), bins=20)
+
+    all_values = np.concatenate([value for _, value in values_to_plot])
+    hist, bins = np.histogram(np.log10(all_values), bins=20)
+    # print(bins[0], bins[-1])
+    # # histogram on log scale. 
+    # # Use non-equal bin sizes, such that they look equal on log scale.
+    # logbins = np.logspace(np.log10(x[x != 0].min()),np.log10(bins[-1]),len(bins))
+    # plt.subplot(212)
+    # plt.figure()
+    values = [value for _, value in values_to_plot]
+    labels = [key for key, _ in values_to_plot]
+    plt.hist(values, bins=np.power(10, bins), label=labels, stacked=True, edgecolor="white")#logbins)
+    plt.xscale('log')
+    # plt.title(f"Combine coefs pvalues histogram for run {run} with {daa_params}")
+    plt.title("Histogram of $p$-values")
+    plt.legend(title="Run")
+    plt.xlabel("log10 pvalues")
     plt.show()
