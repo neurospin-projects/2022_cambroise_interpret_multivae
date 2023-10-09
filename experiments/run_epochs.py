@@ -288,9 +288,9 @@ def run_epochs(exp):
                         model.save_networks()
                         torch.save(model.state_dict(),
                             os.path.join(dir_network_epoch, exp.flags.model_save))
-                except ValueError:
-                    n_trials += 1
-                    writer = SummaryWriter(dir_logs)
-                    tb_logger = TBLogger(log_path, writer)
-                    tb_logger.writer.add_text("FLAGS", str_flags, 0)
-                    print(f"Fail {n_trails}")
+            except ValueError:
+                n_trials += 1
+                writer = SummaryWriter(dir_logs)
+                tb_logger = TBLogger(log_path, writer)
+                tb_logger.writer.add_text("FLAGS", str_flags, 0)
+                print(f"Fail {n_trails}")
