@@ -293,4 +293,4 @@ def run_epochs(exp):
                 writer = SummaryWriter(dir_logs)
                 tb_logger = TBLogger(log_path, writer)
                 tb_logger.writer.add_text("FLAGS", str_flags, 0)
-                print(f"Fail {n_trails}")
+                print(f"Fail {n_trials}")
