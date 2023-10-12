@@ -211,7 +211,7 @@ def retrain_exp(dataset, datasetdir, outdir, run):
                                             str(flags.end_epoch - 1).zfill(4))
         if not os.path.exists(dir_network_last_epoch):
             print_text(f"Retraining model {model_idx}.")
-            run_epochs_model(exp, model_idx)
+            run_epochs_model(experiment, model_idx)
 
 
 
