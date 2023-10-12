@@ -205,7 +205,7 @@ def retrain_exp(dataset, datasetdir, outdir, run):
     for model_idx in range(n_models):
         dir_network_last_epoch = os.path.join(checkpoints_dir,
                                         str(flags.end_epoch - 1).zfill(4))
-        if exp.flags.num_models > 1:
+        if n_models > 1:
             dir_network_last_epoch = os.path.join(checkpoints_dir,
                                             f"model_{model_idx}",
                                             str(flags.end_epoch - 1).zfill(4))
