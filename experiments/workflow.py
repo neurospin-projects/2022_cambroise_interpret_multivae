@@ -201,6 +201,7 @@ def retrain_exp(dataset, datasetdir, outdir, run):
     checkpoints_dir = os.path.join(expdir, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
         flags_file, checkpoints_dir)
+    experiment.set_optimizers()
     n_models = experiment.flags.num_models
     for model_idx in range(n_models):
         dir_network_last_epoch = os.path.join(checkpoints_dir,
