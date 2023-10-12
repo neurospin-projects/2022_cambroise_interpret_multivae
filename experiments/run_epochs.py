@@ -285,6 +285,7 @@ def run_epochs_model(exp, model_idx):
         except ValueError as e:
             n_trials += 1
             exp.reset_model(model_idx)
+            exp.reset_optimizer(model_idx)
             writer = SummaryWriter(dir_logs)
             tb_logger = TBLogger(log_path, writer)
             # tb_logger.writer.add_text("FLAGS", str_flags, 0)

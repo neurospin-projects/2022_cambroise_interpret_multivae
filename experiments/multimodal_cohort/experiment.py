@@ -135,12 +135,33 @@ class MultimodalExperiment(BaseExperiment):
             models = models[0]
         return models
 
-    def reset_model(self, model_idx):
+    def reset_model(self, model_idx=None):
         new_model = VAE(self.flags, self.modalities, self.subsets)
-        if self.flags.num_models == 1 and model_idx == 0:
+        if self.flags.num_models == 1:
             self.models = new_model.to(self.flags.device)
         else:
             self.models[model_idx] = new_model.to(self.flags.device)
+    
+    def reset_optimizer(self, model_idx=None):
+        # optimizer definition
+        total_params = 0
+        model = self.models
+        if self.flags.num_models > 1:
+            model = model[model_idx]
+        total_params += sum(p.numel() for p in model.parameters())
+        params = list(model.parameters())
+        
+        optimizer = optim.Adam(params,
+                            lr=self.flags.initial_learning_rate,
+                            betas=(self.flags.beta_1,
+                            self.flags.beta_2))
+        grad_scaler = torch.cuda.amp.GradScaler()
+        if self.flags.num_models == 1:
+            self.optimizers = optimizer
+            self.grad_scalers = grad_scaler
+        else:
+            self.optimizers[model_idx] = optimizer
+            self.grad_scalers[model_idx] = grad_scaler
 
     def set_modalities(self):
         if type(self.flags.style_dim) is int:
