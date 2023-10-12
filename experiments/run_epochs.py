@@ -227,70 +227,75 @@ def test(model_idx, epoch, exp, tb_logger):
                 tb_logger.write_prd_scores(prd_scores)
 
 
+def run_epochs_model(exp, model_idx):
+    log_path = exp.flags.str_experiment
+    dir_logs = exp.flags.dir_logs
+    if exp.flags.num_models > 1:
+        log_path = os.path.join(log_path, f"model_{model_idx}")
+        dir_logs = dir_logs[model_idx]
+    writer = SummaryWriter(dir_logs)
+    tb_logger = TBLogger(log_path, writer)
+    # tb_logger.writer.add_text("FLAGS", str_flags, 0)
+
+    exp.flags.cov_matrices = {}
+    for mod in exp.modalities:
+        if mod in exp.flags.learn_output_covmatrix:
+            mod_path = os.path.join(
+                exp.flags.datasetdir, f"{mod}_data.npy")
+            mod_idx = np.load(os.path.join(
+                exp.flags.datasetdir, "multiblock_idx_train.npz"),
+                allow_pickle=True)[mod]
+            mod_idx = mod_idx[mod_idx != None].astype(int)
+            mod_data = np.load(mod_path, mmap_mode="r")[mod_idx]
+            cov_matrix = np.cov(mod_data.reshape((len(mod_data), -1)))
+            exp.flags.cov_matrices[mod] = cov_matrix
+
+    # Here, when the model fails due to instabilities, we try to retrain it
+    n_trials_per_model = 5
+    n_trials = 0
+    dir_network_last_epoch = os.path.join(exp.flags.dir_checkpoints,
+                                        str(exp.flags.end_epoch - 1).zfill(4))
+    if exp.flags.num_models > 1:
+        dir_network_last_epoch = os.path.join(exp.flags.dir_checkpoints,
+                                        f"model_{model_idx}",
+                                        str(exp.flags.end_epoch - 1).zfill(4))
+    while (n_trials < n_trials_per_model and
+            not os.path.exists(dir_network_last_epoch)):
+        try:
+            for epoch in range(exp.flags.start_epoch, exp.flags.end_epoch):
+                utils.printProgressBar(epoch, exp.flags.end_epoch)
+                # one epoch of training and testing
+                train(model_idx, epoch, exp, tb_logger)
+                test(model_idx, epoch, exp, tb_logger)
+                # save checkpoints after every 5 epochs
+                if (epoch + 1) % 5 == 0 or (epoch + 1) == exp.flags.end_epoch:
+                    dir_network_epoch = os.path.join(exp.flags.dir_checkpoints,
+                                                        str(epoch).zfill(4))
+                    model = exp.models
+                    if exp.flags.num_models > 1:
+                        dir_network_epoch = os.path.join(exp.flags.dir_checkpoints,
+                                                        f"model_{model_idx}",
+                                                        str(epoch).zfill(4))
+                        model = model[model_idx]
+                    if not os.path.exists(dir_network_epoch):
+                        os.makedirs(dir_network_epoch)
+                    model.save_networks()
+                    torch.save(model.state_dict(),
+                        os.path.join(dir_network_epoch, exp.flags.model_save))
+        except ValueError as e:
+            n_trials += 1
+            exp.reset_model(model_idx)
+            writer = SummaryWriter(dir_logs)
+            tb_logger = TBLogger(log_path, writer)
+            # tb_logger.writer.add_text("FLAGS", str_flags, 0)
+            print(f"Fail {n_trials}")
+
+
 def run_epochs(exp):
     # initialize summary writer
-    
+
     str_flags = utils.save_and_log_flags(exp.flags)
 
     print("training epochs progress:")
     for model_idx in range(exp.flags.num_models):
-        log_path = exp.flags.str_experiment
-        dir_logs = exp.flags.dir_logs
-        if exp.flags.num_models > 1:
-            log_path = os.path.join(log_path, f"model_{model_idx}")
-            dir_logs = dir_logs[model_idx]
-        writer = SummaryWriter(dir_logs)
-        tb_logger = TBLogger(log_path, writer)
-        tb_logger.writer.add_text("FLAGS", str_flags, 0)
-
-        exp.flags.cov_matrices = {}
-        for mod in exp.modalities:
-            if mod in exp.flags.learn_output_covmatrix:
-                mod_path = os.path.join(
-                    exp.flags.datasetdir, f"{mod}_data.npy")
-                mod_idx = np.load(os.path.join(
-                    exp.flags.datasetdir, "multiblock_idx_train.npz"),
-                    allow_pickle=True)[mod]
-                mod_idx = mod_idx[mod_idx != None].astype(int)
-                mod_data = np.load(mod_path, mmap_mode="r")[mod_idx]
-                cov_matrix = np.cov(mod_data.reshape((len(mod_data), -1)))
-                exp.flags.cov_matrices[mod] = cov_matrix
-
-        # Here, when the model fails due to instabilities, we try to retrain it
-        n_trials_per_model = 5
-        n_trials = 0
-        dir_network_last_epoch = os.path.join(exp.flags.dir_checkpoints,
-                                         str(exp.flags.end_epoch - 1).zfill(4))
-        if exp.flags.num_models > 1:
-            dir_network_last_epoch = os.path.join(exp.flags.dir_checkpoints,
-                                            f"model_{model_idx}",
-                                            str(exp.flags.end_epoch - 1).zfill(4))
-        while (n_trials < n_trials_per_model and 
-               not os.path.exists(dir_network_last_epoch)):
-            try:
-                for epoch in range(exp.flags.start_epoch, exp.flags.end_epoch):
-                    utils.printProgressBar(epoch, exp.flags.end_epoch)
-                    # one epoch of training and testing
-                    train(model_idx, epoch, exp, tb_logger)
-                    test(model_idx, epoch, exp, tb_logger)
-                    # save checkpoints after every 5 epochs
-                    if (epoch + 1) % 5 == 0 or (epoch + 1) == exp.flags.end_epoch:
-                        dir_network_epoch = os.path.join(exp.flags.dir_checkpoints,
-                                                         str(epoch).zfill(4))
-                        model = exp.models
-                        if exp.flags.num_models > 1:
-                            dir_network_epoch = os.path.join(exp.flags.dir_checkpoints,
-                                                            f"model_{model_idx}",
-                                                            str(epoch).zfill(4))
-                            model = model[model_idx]
-                        if not os.path.exists(dir_network_epoch):
-                            os.makedirs(dir_network_epoch)
-                        model.save_networks()
-                        torch.save(model.state_dict(),
-                            os.path.join(dir_network_epoch, exp.flags.model_save))
-            except ValueError:
-                n_trials += 1
-                writer = SummaryWriter(dir_logs)
-                tb_logger = TBLogger(log_path, writer)
-                tb_logger.writer.add_text("FLAGS", str_flags, 0)
-                print(f"Fail {n_trials}")
+        run_epochs_model(exp, model_idx)

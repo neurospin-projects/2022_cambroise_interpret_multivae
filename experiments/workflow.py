@@ -27,7 +27,7 @@ import torch
 from torch.distributions import Normal
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-from run_epochs import run_epochs
+from run_epochs import run_epochs, run_epochs_model
 from multimodal_cohort.flags import parser
 from utils.filehandling import create_dir_structure
 from multimodal_cohort.experiment import MultimodalExperiment
@@ -190,6 +190,30 @@ def train_exp(dataset, datasetdir, outdir, input_dims, input_channels=3,
                 runs["allow_missing_blocks"].append(flags.allow_missing_blocks)
         runs = pd.DataFrame(runs)
     runs.to_csv(os.path.join(flags.dir_experiment, "runs.tsv"), index=False, sep="\t")
+
+
+def retrain_exp(dataset, datasetdir, outdir, run):
+
+    expdir = os.path.join(outdir, run)
+    flags_file = os.path.join(expdir, "flags.rar")
+    if not os.path.isfile(flags_file):
+        raise ValueError("You need first to train the model.")
+    checkpoints_dir = os.path.join(expdir, "checkpoints")
+    experiment, flags = MultimodalExperiment.get_experiment(
+        flags_file, checkpoints_dir)
+    n_models = experiment.flags.num_models
+    for model_idx in range(n_models):
+        dir_network_last_epoch = os.path.join(checkpoints_dir,
+                                        str(flags.end_epoch - 1).zfill(4))
+        if exp.flags.num_models > 1:
+            dir_network_last_epoch = os.path.join(checkpoints_dir,
+                                            f"model_{model_idx}",
+                                            str(flags.end_epoch - 1).zfill(4))
+        if not os.path.exists(dir_network_last_epoch):
+            print_text(f"Retraining model {model_idx}.")
+            run_epochs_model(exp, model_idx)
+
+
 
 
 def daa_exp(dataset, datasetdir, outdir, run, sampling="likelihood",

@@ -135,6 +135,13 @@ class MultimodalExperiment(BaseExperiment):
             models = models[0]
         return models
 
+    def reset_model(self, model_idx):
+        new_model = VAE(self.flags, self.modalities, self.subsets)
+        if self.flags.num_models == 1 and model_idx == 0:
+            self.models = new_model.to(self.flags.device)
+        else:
+            self.models[model_idx] = new_model.to(self.flags.device)
+
     def set_modalities(self):
         if type(self.flags.style_dim) is int:
             self.flags.style_dim = [self.flags.style_dim] * self.num_modalities

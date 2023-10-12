@@ -19,6 +19,7 @@ from analyze_avatars import analyze_avatars, assess_robustness, univariate_tests
 
 fire.Fire({
     "train": wf.train_exp,
+    "retrain": wf.retrain_exp,
     "daa": wf.daa_exp,
     "anova": wf.anova_exp,
     "daa-plot-most-connected": wf.daa_plot_most_connected,
