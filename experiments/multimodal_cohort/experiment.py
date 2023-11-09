@@ -113,7 +113,8 @@ class MultimodalExperiment(BaseExperiment):
                 cp_files = glob.glob(
                     os.path.join(checkpoints_dir, f"model_{model_idx}", "*", flags.model_save))
             if len(cp_files) == 0:
-                raise ValueError("You need first to train the model.")
+                print("Warning: this model was not trained.")
+                continue
             cp_files = sorted(
                 cp_files, key=lambda path: int(path.split(os.sep)[-2]))
             if load_epoch is None:
