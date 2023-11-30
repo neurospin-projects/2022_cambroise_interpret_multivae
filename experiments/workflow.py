@@ -158,11 +158,11 @@ def train_exp(dataset, datasetdir, outdir, input_dims, input_channels=3,
     if not flags.factorized_representation:
         flags.style_dim = [0] * len(flags.style_dim)
 
-    print(f"Training run {flags.dir_experiment_run.split("/")[-1]}...")
+    print(f"Training run {flags.dir_experiment_run.split('/')[-1]}...")
     mst = MultimodalExperiment(flags)
     mst.set_optimizers()
     run_epochs(mst)
-    print(f"Run {flags.dir_experiment_run.split("/")[-1]} trained.")
+    print(f"Run {flags.dir_experiment_run.split('/')[-1]} trained.")
 
     if os.path.exists(os.path.join(flags.dir_experiment, "runs.tsv")):
         runs = pd.read_table(os.path.join(flags.dir_experiment, "runs.tsv"))
