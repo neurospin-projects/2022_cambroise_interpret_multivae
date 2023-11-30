@@ -34,14 +34,16 @@ def get_color_list(color_name, n_colors=None):
     """
     color_palette = getattr(px.colors.qualitative, color_name, None)
     if color_palette is None:
-        mymap = plt.get_cmap(color_name)
-        if type(mymap) is mcolors.ListedColormap:
-            color_palette = mymap.colors
-        elif n_colors is None:
-            raise ValueError("You want to use a continuous color map but did "
-                             "not provide a number of colors")
-        else:
-            color_palette = [mymap(idx / (n_colors)) for idx in range(n_colors)]
+        color_palette = []
+        for cname in color_name.split("+"):
+            mymap = plt.get_cmap(cname)
+            if type(mymap) is mcolors.ListedColormap:
+                color_palette += list(mymap.colors)
+            elif n_colors is None:
+                raise ValueError("You want to use a continuous color map but did "
+                                "not provide a number of colors")
+            else:
+                color_palette += [mymap(idx / (n_colors)) for idx in range(n_colors)]
     return color_palette
 
 def plt_to_plotly_rgb(color):

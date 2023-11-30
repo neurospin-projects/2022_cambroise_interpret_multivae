@@ -91,7 +91,7 @@ def basic_routine_epoch(exp, model_idx, batch):
     batch_d = batch[0]
     mods = exp.modalities
     for k, m_key in enumerate(batch_d.keys()):
-        batch_d[m_key] = Variable(batch_d[m_key]).to(exp.flags.device).float()
+        batch_d[m_key] = Variable(batch_d[m_key]).to(exp.flags.device, non_blocking=True).float()
     results = model(batch_d)
 
     log_probs, weighted_log_prob = calc_log_probs(exp, results, batch)
@@ -162,7 +162,7 @@ def train(model_idx, epoch, exp, tb_logger):
         exp.models = model
     sampler = MissingModalitySampler(dataset, batch_size=exp.flags.batch_size,
                                      indices=sub_indices)
-    d_loader = DataLoader(dataset, batch_sampler=sampler, num_workers=8)
+    d_loader = DataLoader(dataset, batch_sampler=sampler, num_workers=8, pin_memory=True)
     for iteration, batch in enumerate(d_loader):
         # with torch.autocast(exp.flags.device.type):
         basic_routine = basic_routine_epoch(exp, model_idx, batch)
@@ -206,7 +206,7 @@ def test(model_idx, epoch, exp, tb_logger):
             exp.models = model
 
         # sampler = MissingModalitySampler(dataset, batch_size=exp.flags.batch_size)
-        d_loader = DataLoader(dataset, batch_size=exp.flags.batch_size, num_workers=8)
+        d_loader = DataLoader(dataset, batch_size=exp.flags.batch_size, num_workers=8, pin_memory=True)
 
         for _, batch in enumerate(d_loader):
             basic_routine = basic_routine_epoch(exp, model_idx, batch)

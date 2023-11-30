@@ -15,10 +15,12 @@ Organize the analysis steps.
 # System import
 import fire
 import workflow as wf
-from analyze_avatars import analyze_avatars, assess_robustness, univariate_tests, evaluate_stability, evaluate_stability_scaling, study_heuristics
+import analyze_avatars as aa
+import stability
 
 fire.Fire({
     "train": wf.train_exp,
+    "multiple-train": wf.multiple_train_exp,
     "retrain": wf.retrain_exp,
     "daa": wf.daa_exp,
     "anova": wf.anova_exp,
@@ -27,14 +29,19 @@ fire.Fire({
     "daa-plot-score-metric": wf.daa_plot_score_metric,
     "daa-plot-score-metric-strongest": wf.daa_plot_score_metric_strongest,
     "rsa": wf.rsa_exp,
+    "rsa-score-models": wf.score_models,
     "rsa-plot": wf.rsa_plot_exp,
     "hist-plot": wf.hist_plot_exp,
     # "avatar-plot": wf.avatar_plot_exp,
-    "daa-analysis": analyze_avatars,
-    "daa-robustness": assess_robustness,
-    "univariate-tests": univariate_tests,
-    "daa-evaluate-stability": evaluate_stability,
-    "daa-evaluate-stability-scaling": evaluate_stability_scaling,
-    "daa-study-heuristics": study_heuristics,
-    "rsa-score-models": wf.score_models
+    "daa-analysis": aa.analyze_avatars,
+    "daa-robustness": aa.assess_robustness,
+    "univariate-tests": aa.univariate_tests,
+    "daa-evaluate-stability": stability.evaluate_stability,
+    "daa-validate-stability": stability.validate_stability,
+    "daa-evaluate-stability-scaling": stability.evaluate_stability_scaling,
+    "daa-study-heuristics": stability.study_heuristics,
+    "daa-plot-most-connected-stable": stability.daa_plot_most_connected_stable,
+    "daa-plot-metric-score-stable": stability.daa_plot_metric_score_stable,
+    "permuted-daa": stability.permuted_daa_exp,
+    "check-permuted-associations": stability.check_permutation_stable_associations,
 })

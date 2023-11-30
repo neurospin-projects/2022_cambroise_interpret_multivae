@@ -13,6 +13,7 @@ Define the digital avatar functions used during the analysis.
 
 # Imports
 import os
+import glob
 import itertools
 from joblib import Parallel, delayed
 import numpy as np
@@ -29,7 +30,7 @@ from stat_utils import make_regression
 from color_utils import (print_title, print_subtitle, print_text)
 
 
-def make_digital_avatars(outdir, run, params, additional_data):
+def make_digital_avatars(outdir, run, params, additional_data, permuted=False):
     """ Build the digital avatars using clinical scores taverses
     to influence the imaging part.
     Parameters
@@ -73,6 +74,8 @@ def make_digital_avatars(outdir, run, params, additional_data):
         torch.manual_seed(params.seed)
     name = "_".join(["_".join([key, str(val)])
                      for key, val in params.__dict__.items()])
+    if permuted:
+        name += "_permuted"
     resdir = os.path.join(daadir, name)
 
     da_file = os.path.join(resdir, "rois_digital_avatars.npy")
@@ -126,6 +129,8 @@ def make_digital_avatars(outdir, run, params, additional_data):
                         break
                 for idx, mod in enumerate(modalities):
                     data[mod] = Variable(data[mod]).to(device).float()
+                    if permuted:
+                        data[mod] = data[mod][torch.randperm(data[mod].size()[0])]
                 _data[f"z{phase}"] = model.inference(data)
                 _data[f"data{phase}"] = data
         latents = SimpleNamespace(**_data)
@@ -173,6 +178,8 @@ def make_digital_avatars(outdir, run, params, additional_data):
                     break
             for idx, mod in enumerate(modalities):
                 data[mod] = Variable(data[mod]).to(device).float()
+                if permuted:
+                    data[mod] = data[mod][torch.randperm(data[mod].size()[0])]
             metadata_df = pd.DataFrame(columns=list(metadata.keys()))
             for column in metadata.keys():
                 if type(metadata[column]) is list:
@@ -223,6 +230,9 @@ def make_digital_avatars(outdir, run, params, additional_data):
                 scores_values = np.swapaxes(
                     scores_values, 0, 1)
             rois_digital_avatars[model_idx, val_idx] = rois_avatars
+            if permuted:
+                scores_values = scores_values[
+                    torch.randperm(scores_values.size()[0])]
             sampled_scores.append(scores_values.cpu().detach().numpy())
         all_sampled_scores.append(sampled_scores)
         all_metadatas.append(metadatas)
@@ -237,7 +247,7 @@ def make_digital_avatars(outdir, run, params, additional_data):
 
 
 def compute_daa_statistics(outdir, run, params, additional_data,
-                           save_all_coefs=False):
+                           save_all_coefs=False, permuted=False):
     """ Perform the digital avatars analysis using clinical scores taverses
     to influence the imaging part.
     Parameters
@@ -271,7 +281,7 @@ def compute_daa_statistics(outdir, run, params, additional_data,
     print_subtitle("Loading data...")
     flags_file = os.path.join(expdir, "flags.rar")
     if not os.path.isfile(flags_file):
-        raise ValueError("You need first to train the model.")    
+        raise ValueError("You need first to train the model.")
     checkpoints_dir = os.path.join(expdir, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
         flags_file, checkpoints_dir)
@@ -285,6 +295,8 @@ def compute_daa_statistics(outdir, run, params, additional_data,
 
     name = "_".join(["_".join([key, str(val)])
                      for key, val in params.__dict__.items()])
+    if permuted:
+        name += "_permuted"
     resdir = os.path.join(daadir, name)
     if not os.path.isdir(resdir):
         raise ValueError("You must first compute digital avatars before "
@@ -428,11 +440,11 @@ def compute_regressions(score_idx, roi_idx, base_df, rois_avatars,
     df = base_df.copy()
     df["roi_avatar"] = (
         rois_avatars[:, score_idx, :, roi_idx].flatten())
-    df["roi_reconstruction"] = np.repeat(
-        rois_reconstruction[:, roi_idx, np.newaxis],
-        params.n_samples, axis=1).flatten()
     y_name = "roi_avatar"
     if params.reg_method == "fixed":
+        df["roi_reconstruction"] = np.repeat(
+            rois_reconstruction[:, roi_idx, np.newaxis],
+            params.n_samples, axis=1).flatten()
         df["roi_avatar_diff"] = df["roi_avatar"] - df["roi_reconstruction"]
         y_name = "roi_avatar_diff"
     
@@ -476,140 +488,92 @@ def compute_significativity(pvalues, trust_level, vote_prop, n_validation,
     return idx_sign, significant_assoc
 
 
-def compute_associations(dataset, datasetdir, outdir, run,
-                         heuristic, metrics=["thickness", "meancurv", "area"],
-                         scores=None, remove_worst_models=0):
+class Heuristic:
+    def __init__(self, params, additional_data):
+        granularities = ["overall", "metric", "score", "metric_score"]
+        self.granularity = granularities[0]
+        if any([g in params.keys() for g in granularities]):
+            assert len(list(params.keys())) == 1
+            self.granularity = next(iter(params.keys()))
+            params = params[self.granularity]
+        self.params = params
+        self.additional_data = additional_data
 
-    # Computing heuristics with various parameters for each metric / score
-    run_results = {}
-    expdir = os.path.join(outdir, run)
-    daadir = os.path.join(expdir, "daa")
-    # print_text(f"experimental directory: {expdir}")
-    # print_text(f"DAA directory: {daadir}")
-    simdirs = [path for path in glob.glob(os.path.join(daadir, "*"))
-            if os.path.isdir(path)]
-    # print_text(f"Simulation directories: {','.join(simdirs)}")
+    def __call__(self, coefs, pvalues, model_scores=None, return_agg=False):
 
-    flags_file = os.path.join(expdir, "flags.rar")
-    if not os.path.isfile(flags_file):
-        raise ValueError("You need first to train the model.")
-    checkpoints_dir = os.path.join(expdir, "checkpoints")
-    # experiment, flags = MultimodalExperiment.get_experiment(
-    #     flags_file, checkpoints_dir)
-
-    clinical_names = np.load(
-        os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
-    clinical_names = clinical_names.tolist()
-    if scores is None:
-        scores = clinical_names
-    rois_names = np.load(
-        os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
-    metadata = pd.read_table(
-        os.path.join(datasetdir, "metadata_train.tsv"))
-    metadata_columns = metadata.columns.tolist()
-
-    additional_data = SimpleNamespace(metadata_columns=metadata_columns,
-                                    clinical_names=clinical_names,
-                                    rois_names=rois_names)
-
-    model_indices = list(range(50))
-    if remove_worst_models > 0 or "weighted" in heuristic.aggregation:
-
-        model_scores = score_models(dataset, datasetdir, outdir, run,
-                                    scores=scores)
-        if int(remove_worst_models) == remove_worst_models:
-            worst_models = np.argsort(model_scores)[:remove_worst_models]
-            for model_idx in worst_models:
-                model_indices.remove(model_idx)
-        else:
-            model_indices = model_indices[model_scores >= remove_worst_models]
-
-    for dirname in simdirs:
-        # print_text(dirname)
-        if not os.path.exists(os.path.join(dirname, "coefs.npy")):
-            continue
-        coefs = np.load(os.path.join(dirname, "coefs.npy"))
-        pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
-
-        n_validation = pvalues.shape[1]
-
-        sampling = dirname.split("sampling_")[1].split("_sample")[0]
-        sample_latent = dirname.split("latents_")[1].split("_seed")[0]
-        local_n_subjects = int(dirname.split("subjects_")[1].split("_M")[0])
+        clinical_names = self.additional_data.clinical_names
+        rois_names = self.additional_data.rois_names
+        scores = self.additional_data.scores
+        metrics = self.additional_data.metrics
         
-        dir_results = {}
         # Selection of model / validation indices of interest
-        higher_is_better = False
-        if heuristic.type == "pvalues":
-            values = pvalues[model_indices]
-        else:
-            higher_is_better = True
-            values = coefs[model_indices]
+        agg_values = np.zeros((len(clinical_names), len(rois_names)))
+        if self.granularity == "overall":
+            self._parse_params(self.params)
+            higher_is_better = False
+            if self.type == "pvalues":
+                values = pvalues
+            else:
+                higher_is_better = True
+                values = coefs
 
-        # Aggregation
-        values_std = values.std((0, 1))
-        if hasattr(values, heuristic.aggregation):
-            agg_values = getattr(values, heuristic.aggregation)((0, 1))
-        elif heuristic.aggregation == "vote":
-            vote_prop = heuristic.params["vote_prop"]
-            _, associations = compute_significativity(
-                values, 1, vote_prop, 1, additional_data,
-                correct_threshold=True, verbose=False)
-            return associations
-        elif "combine" in heuristic.aggregation:
-            method = heuristic.aggregation.split("combine_")[-1]
-            agg_values = combine_all_pvalues(values, method)
-        elif "test" in heuristic.aggregation:
-            values = non_nullity_coef(coefs[model_indices])
-        elif "weighted" in heuristic.aggregation:
-            method = heuristic.aggregation.split("weighted_mean_")[-1]
-            if method.startswith("rank"):
-                sorted_idx = np.argsort(
-                    model_scores[run_model_indices]).tolist()
-                weights = []
-                for idx in range(len(run_model_indices)):
-                    weights.append(sorted_idx.index(idx) + 1)
-                weights = np.array(weights)
-            elif method.startswith("score"):
-                weights = model_scores[run_model_indices]
-            if heuristic.endswith("softmax"):
-                weights = np.exp(weights)
-            elif heuristic.endswith("log"):
-                weights = np.log(weights)
-            weights = weights / weights.sum()            
-            agg_values = np.average(values.mean(1), axis=0, weights=weights)        
+            # Aggregation
+            agg_values, values_std = self.aggregate(values, model_scores)
+            if self.aggregation == "vote":
+                return agg_values
 
         rois = np.array(
             list(set([name.rsplit("_", 1)[0] for name in rois_names])))
 
         # Computing associations
         associations = {"metric": [], "roi": [], "score": []}
-        strategy = heuristic.strategy
         for metric in metrics:
+            metric_indices = np.array(
+                [roi_idx for roi_idx, name in enumerate(rois_names)
+                if metric in name])
+            if self.granularity == "metric":
+                self._parse_params(self.params[metric])
+                higher_is_better = False
+                if self.type == "pvalues":
+                    values = pvalues
+                else:
+                    higher_is_better = True
+                    values = coefs
+                local_agg_values, values_std = self.aggregate(values, model_scores)
             for score in scores:
                 score_idx = clinical_names.index(score)
-                metric_indices = np.array(
-                    [roi_idx for roi_idx, name in enumerate(rois_names)
-                     if metric in name])
-                if heuristic.type == "coefs":
-                    local_values = np.absolute(values[score_idx, metric_indices])
-                    significance_indices = np.argsort(values)[::-1]
+                if self.granularity in ["score", "metric_score"]:
+                    local_metric_score = (score if self.granularity == "score"
+                                          else f"{metric}_{score}")
+                    self._parse_params(self.params[local_metric_score])
+                    higher_is_better = False
+                    if self.type == "pvalues":
+                        values = pvalues
+                    else:
+                        higher_is_better = True
+                        values = coefs
+                    local_agg_values, values_std = self.aggregate(values, model_scores)
+                    agg_values[score_idx, metric_indices] = local_agg_values[score_idx, metric_indices]
+
+                if self.type == "coefs":
+                    local_values = np.absolute(agg_values[score_idx, metric_indices])
+                    significance_indices = np.argsort(local_values)[::-1]
                 else:
-                    local_values = agg_pvalues[score_idx, metric_indices]
-                    significance_indices = np.argsort(values)
+                    local_values = agg_values[score_idx, metric_indices]
+                    significance_indices = np.argsort(local_values)
                 stds = values_std[score_idx, metric_indices]
-                if "-" not in strategy:
-                    strat_param = heuristic.params[strategy]
-                    if strategy == "num":
+                if "-" not in self.strategy:
+                    strat_param = self.strat_params[self.strategy]
+                    if self.strategy == "num":
                         rois_indices = significance_indices[:strat_param]
-                    elif strategy == "thr":
-                        ordered_values = values[significance_indices]
+                    elif self.strategy == "thr":
+                        ordered_values = local_values[significance_indices]
                         rois_indices = significance_indices[
                             ordered_values >= strat_param if
                             higher_is_better else
                             ordered_values <= strat_param]
-                    elif strategy == "var":
-                        ordered_values = values[significance_indices]
+                    elif self.strategy == "var":
+                        ordered_values = local_values[significance_indices]
                         ordered_stds = stds[significance_indices]
                         rois_indices = significance_indices[
                             ordered_values - strat_param * ordered_stds > 0]
@@ -622,11 +586,11 @@ def compute_associations(dataset, datasetdir, outdir, run,
                         associations["metric"].append(metric)
                         associations["roi"].append(area)
                 else:
-                    second_param = strategy.split("-")[1]
-                    num = heuristic.params["num"]
-                    other_param = heuristic.param[second_param]
+                    second_param = self.strategy.split("-")[1]
+                    num = self.strat_params["num"]
+                    other_param = self.strat_params[second_param]
 
-                    ordered_values = values[significance_indices]
+                    ordered_values = local_values[significance_indices]
                     ordered_stds = stds[significance_indices]
                     if second_param == "var":
                         rois_indices = significance_indices[:num][
@@ -645,25 +609,428 @@ def compute_associations(dataset, datasetdir, outdir, run,
                         associations["score"].append(score)
                         associations["metric"].append(metric)
                         associations["roi"].append(area)
+        if return_agg:
+            return pd.DataFrame.from_dict(associations), agg_values
         return pd.DataFrame.from_dict(associations)
+    
+    def _parse_params(self, params):
+        assert len(list(params.keys())) == 1
+        self.name, other_params = next(iter(params.items()))
+        self.type, self.aggregation = self.name.split("_", 1)
+        self.strategy = other_params["strategy"]
+        if "-" in self.strategy:
+            first_param, second_param = self.strategy.split("-")
+            self.strat_params = {first_param: other_params[first_param],
+                                 second_param: other_params[second_param]}
+        else:
+            self.strat_params = {self.strategy : other_params[self.strategy]}
+    
+    def aggregate(self, values, model_scores=None):
+        values_std = values.std((0, 1))
+        apply_min_max = self.type == "coefs" and self.aggregation == "max"
+        if hasattr(values, self.aggregation) and not apply_min_max:
+            agg_values = getattr(values, self.aggregation)((0, 1))
+        elif apply_min_max:
+            agg_values_pos = values.max((0, 1))
+            agg_values_neg = values.min((0, 1))
+            agg_values = agg_values_pos.copy()
+            idx_neg = agg_values_pos < -agg_values_neg
+            agg_values[idx_neg] = agg_values_neg[idx_neg]
+        elif self.aggregation == "vote":
+            vote_prop = self.strat_params["vote_prop"]
+            _, associations = compute_significativity(
+                values, 1, vote_prop, 1, self.additional_data,
+                correct_threshold=True, verbose=False)
+            return associations, None
+        elif "combine" in self.aggregation:
+            method = self.aggregation.split("combine_")[-1]
+            agg_values = combine_all_pvalues(values, method)
+        elif "test" in self.aggregation:
+            agg_values = non_nullity_coef(values)
+        elif "weighted" in self.aggregation:
+            method = self.aggregation.split("weighted_mean_")[-1]
+            if method.startswith("rank"):
+                sorted_idx = np.argsort(
+                    model_scores).tolist()
+                weights = []
+                for idx in range(len(values)):
+                    weights.append(sorted_idx.index(idx) + 1)
+                weights = np.array(weights)
+            elif method.startswith("score"):
+                weights = model_scores
+            if self.name.endswith("softmax"):
+                weights = np.exp(weights)
+            elif self.name.endswith("log"):
+                weights = np.log(weights)
+            weights = weights / weights.sum()
+            agg_values = np.average(values.mean(1), axis=0, weights=weights)
+        return agg_values, values_std
 
-def compute_stability(associations0, associations1, N_prior, eps=1e-8):
+def non_nullity_coef(coefs):
+    combined_pvalues = np.ones(coefs.shape[-2:], dtype="double")
+    for score_idx in range(coefs.shape[-2]):
+        for roi_metric_idx in range(coefs.shape[-1]):
+            df_coefs = pd.DataFrame(
+                coefs[:, :, score_idx, roi_metric_idx].flatten(), columns=['beta'])
+            est = sm.OLS.from_formula("beta ~ 1", data=df_coefs)
+            idx_of_beta = "Intercept"
+            results = est.fit()
+            combined_pvalues[score_idx, roi_metric_idx] = (
+                results.pvalues[idx_of_beta])
+    return combined_pvalues
+
+
+def score_models(dataset, datasetdir, outdir, run, scores=None,
+                 latent_name="joint", plot_score_hist=False):
+    """ Uses previously computed Representational Similarity Analysis (RSA) on 
+    latent representations with input scores in order to score models.
+    Parameters
+    ----------
+    dataset: str
+        the dataset name: euaims or hbn.
+    datasetdir: str
+        the path to the dataset associated data.
+    outdir: str
+        the destination folder.
+    run: str
+        the name of the experiment in the destination folder:
+        `<dataset>_<timestamp>'.
+    scores: list or None, default None
+        the scores used to score the models
+    latent_name: str, default joint
+        the name of the latent representation space to use
+    plot_score_hist: bool, default False,
+        weither or not to plot the histogram of the computed scores
+
+    Returns
+    -------
+    score_per_model: numpy.ndarray
+        score per model
+    """
+    import matplotlib.pyplot as plt
+    expdir = os.path.join(outdir, run)
+    rsadir = os.path.join(expdir, "rsa")
+
+    if not os.path.exists(rsadir):
+        raise ValueError("You must first run rsa n your models to score them.")
+    
+    clinical_names = np.load(
+        os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
+    clinical_names = clinical_names.tolist()
+    if scores is None:
+        scores = clinical_names
+    
+    kendalltaus = np.load(os.path.join(rsadir, "kendalltau_stats.npy"))
+    score_indices = [clinical_names.index(score) for score in scores]
+    latent_names = ["joint", "clinical_rois", "clinical_style", "rois_style"]
+    score_per_model = kendalltaus[:, :, :, score_indices, 0]
+    score_per_model = score_per_model.mean(axis=(-2, -1))
+    score_per_model = score_per_model[:, latent_names.index(latent_name)]
+    # ordered_score = np.argsort(score_per_model)
+    # for n_worst in range(0, 20):
+    #     print(f"{n_worst}th worst score : {score_per_model[ordered_score[n_worst]]}")
+    if plot_score_hist:
+        plt.hist(score_per_model, bins=20)
+        plt.title("Model scores histogram")
+        plt.show()
+    return score_per_model
+
+def combine_all_pvalues(pvalues, method="fisher"):
+    combined_pvalues = np.ones(pvalues.shape[-2:])
+    for score_idx in range(pvalues.shape[-2]):
+        for roi_metric_idx in range(pvalues.shape[-1]):
+            res = combine_pvalues(
+                pvalues[:, :, score_idx, roi_metric_idx].flatten())
+            combined_pvalues[score_idx, roi_metric_idx] = res[1]
+    return combined_pvalues
+
+
+def compute_all_associations(dataset, datasetdir, outdir, runs,
+                             heuristics_params, metrics=None,
+                             scores=None, model_indices=None, 
+                             validation_indices=None, n_subjects=301,
+                             sampling=None, sample_latents=None,
+                             ensemble_models=False):
+
+    global_results = []
+    clinical_names = np.load(
+            os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
+    clinical_names = clinical_names.tolist()
+    if scores is None:
+        scores = clinical_names
+    rois_names = np.load(
+        os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
+    metadata = pd.read_table(
+        os.path.join(datasetdir, "metadata_train.tsv"))
+    metadata_columns = metadata.columns.tolist()
+
+    additional_data = SimpleNamespace(metadata_columns=metadata_columns,
+                                        clinical_names=clinical_names,
+                                        rois_names=rois_names,
+                                        scores=scores, metrics=metrics)
+
+    # Computing heuristics with various parameters for each metric / score
+    # If ensemble models across runs instead of models for each run
+    if ensemble_models:
+        for run_idx, run in enumerate(runs):
+            run_results = {}
+            expdir = os.path.join(outdir, run)
+            daadir = os.path.join(expdir, "daa")
+            # print_text(f"experimental directory: {expdir}")
+            # print_text(f"DAA directory: {daadir}")
+            simdirs = [path for path in glob.glob(os.path.join(daadir, "*"))
+                    if os.path.isdir(path)]
+            # print_text(f"Simulation directories: {','.join(simdirs)}")
+
+            # flags_file = os.path.join(expdir, "flags.rar")
+            # if not os.path.isfile(flags_file):
+            #     raise ValueError("You need first to train the model.")
+            # checkpoints_dir = os.path.join(expdir, "checkpoints")
+            # experiment, flags = MultimodalExperiment.get_experiment(
+            #     flags_file, checkpoints_dir)
+
+            clinical_names = np.load(
+                os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
+            clinical_names = clinical_names.tolist()
+            if scores is None:
+                scores = clinical_names
+            rois_names = np.load(
+                os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
+            metadata = pd.read_table(
+                os.path.join(datasetdir, "metadata_train.tsv"))
+            metadata_columns = metadata.columns.tolist()
+
+            additional_data = SimpleNamespace(metadata_columns=metadata_columns,
+                                            clinical_names=clinical_names,
+                                            rois_names=rois_names,
+                                            scores=scores, metrics=metrics)
+
+            for dirname in simdirs:
+                # print_text(dirname)
+                if not os.path.exists(os.path.join(dirname, "coefs.npy")):
+                    continue
+                coefs = np.load(os.path.join(dirname, "coefs.npy"))
+                pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
+
+                if model_indices is None:
+                    run_model_indices = range(len(pvalues))
+                elif len(model_indices) >= 2 and type(model_indices[0]) is not int:
+                    run_model_indices = model_indices[run_idx]
+                elif np.array(model_indices).ndim == 2:
+                    run_model_indices = model_indices[:, run_idx]
+                else:
+                    run_model_indices = model_indices
+
+                n_validation = pvalues.shape[1]
+                if validation_indices is not None:
+                    n_validation = len(validation_indices)
+
+
+                local_sampling = dirname.split("sampling_")[1].split("_sample")[0]
+                local_sample_latents = dirname.split("latents_")[1].split("_seed")[0]
+                local_n_subjects = int(dirname.split("subjects_")[1].split("_M")[0])
+
+                if (local_n_subjects != n_subjects or
+                    (sampling is not None and local_sampling != sampling) or
+                    (sample_latents is not None and
+                    local_sample_latents != str(sample_latents))):
+                    continue
+
+                
+                # Selection of model / validation indices of interest
+                # if validation_indices is not None:
+                #     pvalues = pvalues[:, validation_indices]
+                #     coefs = coefs[:, validation_indices]
+                # else:
+                #     pvalues = pvalues[run_model_indices]
+                #     coefs = coefs[run_model_indices]
+                
+                
+                # model_scores = None
+                # if len(weighted_mean_heuristics) != 0:
+                model_scores = score_models(dataset, datasetdir, outdir, run,
+                                            scores=scores)
+                # model_scores = model_scores[run_model_indices]
+
+                dir_results = {"coefs": coefs, "pvalues": pvalues,
+                               "model_scores": model_scores}
+                
+                run_results[f"{local_sampling}_{local_sample_latents}"] = dir_results
+
+            global_results.append(run_results)
+        weighted_mean_heuristics = [heuristic for heuristic in heuristics_params.keys()
+                                    if "weighted_mean" in heuristic]
+
+        rois = np.array(
+            list(set([name.rsplit("_", 1)[0] for name in rois_names])))
+        
+        final_results = []
+        coefs = np.array([res[f"{sampling}_{sample_latents}"]["coefs"] for res in global_results])
+        pvalues = np.array([res[f"{sampling}_{sample_latents}"]["pvalues"] for res in global_results])
+        model_scores = np.array([res[f"{sampling}_{sample_latents}"]["model_scores"] for res in global_results])
+
+        N_splits = len(coefs[0])
+        for split_idx in range(N_splits):
+            split_results = {}
+            local_results = {}
+            for heuristic_name in heuristics_params.keys():
+                if heuristic_name not in local_results.keys():
+                    local_results[heuristic_name] = {}
+                for strategy in heuristics_params[heuristic_name]["strategy"]:
+                    if "-" in strategy:
+                        first_param, second_param = strategy.split("-")
+                        for first_value, second_value in itertools.product(
+                            heuristics_params[heuristic_name][first_param],
+                            heuristics_params[heuristic_name][second_param]):
+
+                            params = {"strategy": strategy,
+                                    first_param: first_value,
+                                    second_param: second_value}
+                            heuristic_param = {heuristic_name: params}
+                            heuristic = Heuristic(heuristic_param,
+                                                additional_data)
+                            associations = heuristic(coefs[:,split_idx], pvalues[:,split_idx], model_scores[:,split_idx])
+                            strat_param_name = f"strategy_{strategy}_values_{first_value}_{second_value}"
+                            local_results[heuristic.name][strat_param_name] = associations
+                    else:
+                        for strat_param in heuristics_params[heuristic_name][strategy]:
+                            params = {"strategy": strategy,
+                                    strategy : strat_param}
+                            heuristic_param = {heuristic_name: params}
+                            heuristic = Heuristic(heuristic_param,
+                                                additional_data)
+                            associations = heuristic(coefs[:,split_idx], pvalues[:,split_idx], model_scores[:,split_idx])
+                            strat_param_name = f"strategy_{strategy}_value_{strat_param}"
+                            local_results[heuristic.name][strat_param_name] = associations
+            split_results[f"{sampling}_{sample_latents}"] = local_results
+            final_results.append(split_results)
+        return final_results
+    for run_idx, run in enumerate(runs):
+        run_results = {}
+        expdir = os.path.join(outdir, run)
+        daadir = os.path.join(expdir, "daa")
+        # print_text(f"experimental directory: {expdir}")
+        # print_text(f"DAA directory: {daadir}")
+        simdirs = [path for path in glob.glob(os.path.join(daadir, "*"))
+                if os.path.isdir(path)]
+        # print_text(f"Simulation directories: {','.join(simdirs)}")
+
+        # flags_file = os.path.join(expdir, "flags.rar")
+        # if not os.path.isfile(flags_file):
+        #     raise ValueError("You need first to train the model.")
+        # checkpoints_dir = os.path.join(expdir, "checkpoints")
+        # experiment, flags = MultimodalExperiment.get_experiment(
+        #     flags_file, checkpoints_dir)
+
+        for dirname in simdirs:
+            # print_text(dirname)
+            if not os.path.exists(os.path.join(dirname, "coefs.npy")):
+                continue
+            coefs = np.load(os.path.join(dirname, "coefs.npy"))
+            pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
+
+            if model_indices is None:
+                run_model_indices = range(len(pvalues))
+            elif len(model_indices) >= 2 and type(model_indices[0]) is not int:
+                run_model_indices = model_indices[run_idx]
+            elif np.array(model_indices).ndim == 2:
+                run_model_indices = model_indices[:, run_idx]
+            else:
+                run_model_indices = model_indices
+
+            n_validation = pvalues.shape[1]
+            if validation_indices is not None:
+                n_validation = len(validation_indices)
+
+
+            local_sampling = dirname.split("sampling_")[1].split("_sample")[0]
+            local_sample_latents = dirname.split("latents_")[1].split("_seed")[0]
+            local_n_subjects = int(dirname.split("subjects_")[1].split("_M")[0])
+
+            if (local_n_subjects != n_subjects or
+                (sampling is not None and local_sampling != sampling) or
+                (sample_latents is not None and
+                 local_sample_latents != str(sample_latents))):
+                continue
+
+            dir_results = {}
+            # Selection of model / validation indices of interest
+            if validation_indices is not None:
+                pvalues = pvalues[:, validation_indices]
+                coefs = coefs[:, validation_indices]
+            else:
+                pvalues = pvalues[run_model_indices]
+                coefs = coefs[run_model_indices]
+            
+            weighted_mean_heuristics = [heuristic for heuristic in heuristics_params.keys()
+                                        if "weighted_mean" in heuristic]
+            model_scores = None
+            if len(weighted_mean_heuristics) != 0:
+                model_scores = score_models(dataset, datasetdir, outdir, run,
+                                            scores=scores)
+                model_scores = model_scores[run_model_indices]
+
+            rois = np.array(
+                list(set([name.rsplit("_", 1)[0] for name in rois_names])))
+            
+            for heuristic_name in heuristics_params.keys():
+                if heuristic_name not in dir_results.keys():
+                    dir_results[heuristic_name] = {}
+                for strategy in heuristics_params[heuristic_name]["strategy"]:
+                    if "-" in strategy:
+                        first_param, second_param = strategy.split("-")
+                        for first_value, second_value in itertools.product(
+                            heuristics_params[heuristic_name][first_param],
+                            heuristics_params[heuristic_name][second_param]):
+
+                            params = {"strategy": strategy,
+                                      first_param: first_value,
+                                      second_param: second_value}
+                            heuristic_param = {heuristic_name: params}
+                            heuristic = Heuristic(heuristic_param,
+                                                  additional_data)
+                            associations = heuristic(coefs, pvalues, model_scores)
+                            strat_param_name = f"strategy_{strategy}_values_{first_value}_{second_value}"
+                            dir_results[heuristic.name][strat_param_name] = associations
+                    else:
+                        for strat_param in heuristics_params[heuristic_name][strategy]:
+                            params = {"strategy": strategy,
+                                      strategy : strat_param}
+                            heuristic_param = {heuristic_name: params}
+                            heuristic = Heuristic(heuristic_param,
+                                                  additional_data)
+                            associations = heuristic(coefs, pvalues, model_scores)
+                            strat_param_name = f"strategy_{strategy}_value_{strat_param}"
+                            dir_results[heuristic.name][strat_param_name] = associations
+            run_results[f"{local_sampling}_{local_sample_latents}"] = dir_results
+        global_results.append(run_results)
+    return global_results
+
+
+
+def compute_stability(associations0, associations1, N_prior, eps=1e-8, measure="product"):
+    assert measure in ["product", "dice", "jaccard", "tanimoto"]
+
     N0 = len(associations0)
     N1 = len(associations1)
-    N01 = len([assoc for assoc in associations0 if assoc in associations1])
-    eps = 1e-8
+    N_inter = len(set(associations0).intersection(associations1))
+    N_outer = len(set(associations0).union(associations1))
 
-    # The two following formulations are equivalent
-    # stability = ((N01 / (N0 + eps) + N01 / (N1 + eps) ) / 
-    #              (N0 / (N01 + eps) + N1 / (N01 + eps) + eps))
-    stability = N01 * N01 / (N0 * N1 + eps)
-    penality = 2  / (N01 / N_prior + N_prior / (N01 + eps))
+    if measure == "dice":
+        stability = 2 * N_inter / (N0 + N1 + eps)
+    elif measure == "jaccard":
+        stability = N_inter / (N_outer + eps)
+    elif measure == "tanimoto":
+        stability = 1 - (N_outer - N_inter) / (N_outer + eps)
+    else:
+        stability = N_inter * N_inter / (N0 * N1 + eps)
+    penality = 2  / (N_inter / N_prior + N_prior / (N_inter + eps))
     penalized_stability = stability * penality
     return stability, penalized_stability
 
 
 def compute_all_stability(results, daa_params, heuristic, strat_param_name,
-                          ideal_N, metrics, scores):
+                          ideal_N, metrics, scores, measure="product"):
 
     res0 = results[0][daa_params][heuristic][strat_param_name]
     res1 = results[1][daa_params][heuristic][strat_param_name]
@@ -679,7 +1046,7 @@ def compute_all_stability(results, daa_params, heuristic, strat_param_name,
             local_assoc0 = [assoc for assoc in all_assoc0 if metric in assoc and score in assoc]
             local_assoc1 = [assoc for assoc in all_assoc1 if metric in assoc and score in assoc]
             stability, penalized_stability = compute_stability(
-                local_assoc0, local_assoc1, ideal_N)
+                local_assoc0, local_assoc1, ideal_N, measure=measure)
             stability_per_score_metric["daa_params"].append(daa_params)
             stability_per_score_metric["heuristic"].append(heuristic)
             stability_per_score_metric["strat_param"].append(strat_param_name)

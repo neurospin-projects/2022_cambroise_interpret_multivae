@@ -36,7 +36,7 @@ from stat_utils import data2cmat, vec2cmat, fit_rsa, make_regression
 from color_utils import (
     print_title, print_subtitle, print_text, print_result, print_flags)
 from daa_functions import (make_digital_avatars, compute_daa_statistics,
-                           compute_significativity)
+                           compute_significativity, score_models, Heuristic)
 
 
 def train_exp(dataset, datasetdir, outdir, input_dims, input_channels=3,
@@ -126,7 +126,7 @@ def train_exp(dataset, datasetdir, outdir, input_dims, input_channels=3,
         poe_unimodal_elbos=True, save_figure=False, start_epoch=0, style_dim=style_dim,
         subsampled_reconstruction=True, data_seed=data_seed, grad_scaling=grad_scaling,
         learn_output_covmatrix=learn_output_covmatrix)
-    print(flags)
+    # print(flags)
     use_cuda = torch.cuda.is_available()
     flags.device = torch.device("cuda" if use_cuda else "cpu")
     if flags.method == "poe":
@@ -158,9 +158,11 @@ def train_exp(dataset, datasetdir, outdir, input_dims, input_channels=3,
     if not flags.factorized_representation:
         flags.style_dim = [0] * len(flags.style_dim)
 
+    print(f"Training run {flags.dir_experiment_run.split("/")[-1]}...")
     mst = MultimodalExperiment(flags)
     mst.set_optimizers()
     run_epochs(mst)
+    print(f"Run {flags.dir_experiment_run.split("/")[-1]} trained.")
 
     if os.path.exists(os.path.join(flags.dir_experiment, "runs.tsv")):
         runs = pd.read_table(os.path.join(flags.dir_experiment, "runs.tsv"))
@@ -215,6 +217,79 @@ def retrain_exp(dataset, datasetdir, outdir, run):
             run_epochs_model(experiment, model_idx)
 
 
+def multiple_train_exp(dataset, datasetdir, outdir, input_dims, n_runs, input_channels=3,
+              input_ico_order=5, use_surface=False, num_models=1, latent_dim=20,
+              style_dim=[3, 20], data_seed="defaults",
+              num_hidden_layer_encoder=1, num_hidden_layer_decoder=0,
+              allow_missing_blocks=True, factorized_representation=True,
+              likelihood="normal", learning_rate=0.002, batch_size=256,
+              num_epochs=1500, eval_freq=25, eval_freq_fid=100, beta=1.,
+              data_multiplications=1, dropout_rate=0., initial_out_logvar=-3.,
+              learn_output_scale=True, out_scale_per_subject=False,
+              method="joint_elbo", grad_scaling=False,
+              learn_output_covmatrix=[]):
+    """ Train the model.
+    Parameters
+    ----------
+    dataset: str
+        the dataset name: euaims or hbn.
+    datasetdir: str
+        the path to the dataset associated data.
+    outdir: str
+        the destination folder.
+    input_dims: list of int
+        input dimension for each modality.
+    num_models: int, default 1
+        number of models to train
+    latent_dim: int, default 20
+        dimension of common factor latent space.
+    style_dim: list of int, default [3, 20]
+        dimension of specific latent spaces.
+    num_hidden_layers: int, default 1
+        number of hidden laters in the model.
+    allow_missing_blocks: bool, default False
+        optionally, allows for missing modalities.
+    beta: float, default 1
+        default weight of sum of weighted divergence terms.
+    likelihood: str or list, default 'normal'
+        output distribution.
+    learning_rate: float, default 0.002
+        starting learning rate.
+    batch_size: int, default 256
+        batch size for training.
+    num_epochs: int, default 1500
+        the number of epochs for training.
+    eval_freq: int, default 25
+        frequency of evaluation of latent representation of generative
+        performance (in number of epochs).
+    eval_freq_fid: int, default 100
+        frequency of evaluation of latent representation of generative
+        performance (in number of epochs).
+    data_multiplications: int, default 1
+        number of pairs per sample.
+    dropout_rate: float, default 0
+        the dropout rate in the training.
+    initial_out_logvar: float, default -3
+        initial output logvar.
+    learn_output_scale: bool, default True
+        optionally, allows for different scales per feature.
+    learn_output_covmatrix:  list, default []
+        list the modalities for which to learn cov matrix in likelihood model.
+    """
+    print_title(f"MULTIPLETRAIN: {dataset}")
+
+    for run_idx in range(len(n_runs)):
+        train_exp(dataset, datasetdir, outdir, input_dims, input_channels=3,
+              input_ico_order=5, use_surface=False, num_models=1, latent_dim=20,
+              style_dim=[3, 20], data_seed="defaults",
+              num_hidden_layer_encoder=1, num_hidden_layer_decoder=0,
+              allow_missing_blocks=True, factorized_representation=True,
+              likelihood="normal", learning_rate=0.002, batch_size=256,
+              num_epochs=1500, eval_freq=25, eval_freq_fid=100, beta=1.,
+              data_multiplications=1, dropout_rate=0., initial_out_logvar=-3.,
+              learn_output_scale=True, out_scale_per_subject=False,
+              method="joint_elbo", grad_scaling=False,
+              learn_output_covmatrix=[])
 
 
 def daa_exp(dataset, datasetdir, outdir, run, sampling="likelihood",
@@ -604,56 +679,6 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_subjects=301,
         print(df.groupby(["score"]).apply(lambda e: e[:]))
 
 
-def score_models(dataset, datasetdir, outdir, run, scores=None, latent_name="joint"):
-    """ Perform Representational Similarity Analysis (RSA) on estimated
-    latent representations.
-    Parameters
-    ----------
-    dataset: str
-        the dataset name: euaims or hbn.
-    datasetdir: str
-        the path to the dataset associated data.
-    outdir: str
-        the destination folder.
-    run: str
-        the name of the experiment in the destination folder:
-        `<dataset>_<timestamp>'.
-    n_validation: int, default 50
-        the number of times we repeat the experiments.
-    n_subjects: int, default 50
-        the number of samples for each clinical score used to compute the
-        (dis)similarity matrices.
-    seed: int, default 1037
-        optionally specify a seed to control expriment reproducibility, set
-        to None for randomization.
-    """
-    import matplotlib.pyplot as plt
-    expdir = os.path.join(outdir, run)
-    rsadir = os.path.join(expdir, "rsa")
-
-    if not os.path.exists(rsadir):
-        raise ValueError("You must first run rsa n your models to score them.")
-    
-    clinical_names = np.load(
-        os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
-    clinical_names = clinical_names.tolist()
-    if scores is None:
-        scores = clinical_names
-    
-    kendalltaus = np.load(os.path.join(rsadir, "kendalltau_stats.npy"))
-    score_indices = [clinical_names.index(score) for score in scores]
-    latent_names = ["joint", "clinical_rois", "clinical_style", "rois_style"]
-    score_per_model = kendalltaus[:, :, :, score_indices, 0]
-    score_per_model = score_per_model.mean(axis=(-2, -1))
-    score_per_model = score_per_model[:, latent_names.index(latent_name)]
-    # ordered_score = np.argsort(score_per_model)
-    # for n_worst in range(0, 20):
-    #     print(f"{n_worst}th worst score : {score_per_model[ordered_score[n_worst]]}")
-    # plt.hist(score_per_model, bins=15)
-    # plt.show()
-    return score_per_model
-
-
 def hist_plot_exp(datasets, datasetdirs, scores, outdir):
     """ Display specified score histogram across different cohorts.
     Parameters
@@ -736,9 +761,14 @@ def rsa_plot_exp(dataset, datasetdir, outdir, run):
     plot_mosaic(images, cmat_file, n_cols=4, image_size=images.shape[-2:])
 
 
-def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
-                            n_rois=5, plot_associations=False, vote_prop=1,
-                            rescaled=True):
+def daa_plot_most_connected(dataset, datasetdir, outdir, run,
+                            heuristic_name="coefs_mean",
+                            heuristic_strat="num-thr",
+                            heuristic_params=[17, 1e-8],
+                            select_good_models=0.025, 
+                            metrics=["thickness", "meancurv", "area"],
+                            scores=None, plot_associations=False,
+                            n_rois=5, rescaled=False):
     """ Display specified score histogram across different cohorts.
     Parameters
     ----------
@@ -779,6 +809,8 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
     clinical_names = np.load(
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
     clinical_names = clinical_names.tolist()
+    if scores is None:
+        scores = clinical_names
     rois_names = np.load(
         os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
     metadata = pd.read_table(
@@ -787,11 +819,25 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
 
     additional_data = SimpleNamespace(metadata_columns=metadata_columns,
                                       clinical_names=clinical_names,
-                                      rois_names=rois_names)
+                                      rois_names=rois_names,
+                                      scores=scores, metrics=metrics)
 
     rois_names = rois_names.tolist()
     n_models = flags.num_models
     scalers = experiment.scalers
+
+    model_scores = score_models(dataset, datasetdir, outdir, run, scores=scores)
+    model_indices = list(range(len(model_scores)))
+    if select_good_models is not None:
+        if int(select_good_models) == select_good_models:
+            worst_models = np.argsort(model_scores)[:select_good_models]
+            for model_idx in worst_models:
+                model_indices.remove(model_idx)
+        else:
+            model_indices = np.array(model_indices)[model_scores >= select_good_models]
+            print(f"Number of removed models for run {run} :"
+                  f"{len(model_scores) - len(model_indices)} "
+                  f"with threshold {select_good_models}")
 
     marker_signif = "star"
     marker_non_signif = "circle"
@@ -802,21 +848,37 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
         coefs = np.load(os.path.join(dirname, "coefs.npy"))
         pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
 
-        n_validation = int(
-            dirname.split("n_validation_")[1].split("_n_s")[0])
+        if select_good_models is not None:
+            coefs = coefs[model_indices]
+            pvalues = pvalues[model_indices]
 
-        idx_sign, df = compute_significativity(
-            pvalues, trust_level, vote_prop, n_validation, additional_data,
-            correct_threshold=True)
+        if "-" in heuristic_strat:
+            first_param, second_param = heuristic_strat.split("-")
+            params = {"strategy": heuristic_strat,
+                      first_param: heuristic_params[0],
+                      second_param: heuristic_params[1]}
+            heuristic_param = {heuristic_name: params}
+            heuristic = Heuristic(heuristic_param, additional_data,
+                                  model_scores)
+        else:
+            params = {"strategy": heuristic_strat,
+                      heuristic_strat : heuristic_params}
+            heuristic_param = {heuristic_name: params}
+            heuristic = Heuristic(heuristic_param, additional_data,
+                                  model_scores)
+
+        df = heuristic(coefs, pvalues)
 
         print_subtitle(f"Plot regression coefficients radar plots...")
         counts = collections.Counter(df["roi"].values)
         # selected_rois = [item[0] for item in counts.most_common()]
         n_colors = n_rois * len(df["metric"].unique())
-        color_name = "Plotly"
-        if n_colors > 9:
+        color_name = "tab20+tab20b+tab20c"
+        if n_colors < 10:
+            color_name = "Plotly"
+        elif n_colors < 13:
             color_name = "Paired"
-        if n_colors > 12:
+        elif n_colors < 21:
             color_name = "tab20"
         textfont = dict(
             size=20,
@@ -835,7 +897,8 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run, trust_level=0.7,
                 # else:
                 #    selected_coefs = coefs[:, :, roi_idx].mean(axis=0)
                 selected_scores.append(selected_coefs)
-                significativity.append(idx_sign[:, roi_idx].tolist())
+                idx_sign = [((df["metric"] == _metric) & (df["roi"] == _roi) & (df["score"] == _score)).any() for _score in scores]
+                significativity.append(idx_sign)
             all_selected_rois += [area for area in selected_rois if area not in all_selected_rois]
             selected_scores = np.asarray(selected_scores)
             fig = go.Figure()
@@ -1175,7 +1238,11 @@ def daa_plot_most_significant(dataset, datasetdir, outdir, run, n_rois=5,
 
 
 def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
-                          trust_level=0.7, vote_prop=1, rescaled=True):
+                          heuristic_name="coefs_mean",
+                          heuristic_strat="num-thr",
+                          heuristic_params={"num": 17, "thr": 1e-8},
+                          select_good_models=0.025,
+                          rescaled=True):
     """ Display specified score and metric associations
     Parameters
     ----------
@@ -1211,6 +1278,8 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
     clinical_names = np.load(
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
     clinical_names = clinical_names.tolist()
+    if scores is None:
+        scores = clinical_names
     rois_names = np.load(
         os.path.join(datasetdir, "rois_names.npy"), allow_pickle=True)
     metadata = pd.read_table(
@@ -1219,24 +1288,53 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
 
     additional_data = SimpleNamespace(metadata_columns=metadata_columns,
                                       clinical_names=clinical_names,
-                                      rois_names=rois_names)
+                                      rois_names=rois_names, scores=[score],
+                                      metrics=[metric])
     rois_names = rois_names.tolist()
-    significativity_thr = 0.05 / len(clinical_names) / len(rois_names)
     n_models = flags.num_models
     scalers = experiment.scalers
 
+    model_scores = score_models(dataset, datasetdir, outdir, run, scores=scores)
+    model_indices = list(range(len(model_scores)))
+    if select_good_models is not None:
+        if int(select_good_models) == select_good_models:
+            worst_models = np.argsort(model_scores)[:select_good_models]
+            for model_idx in worst_models:
+                model_indices.remove(model_idx)
+        else:
+            model_indices = np.array(model_indices)[model_scores >= select_good_models]
+            print(f"Number of removed models for run {run} :"
+                  f"{len(model_scores) - len(model_indices)} "
+                  f"with threshold {select_good_models}")
+
+    marker_signif = "star"
+    marker_non_signif = "circle"
     for dirname in simdirs:
-        print_text(dirname)
+        print_subtitle(f"Drawing radar plots for {dirname}")
         if not os.path.exists(os.path.join(dirname, "coefs.npy")):
             continue
         coefs = np.load(os.path.join(dirname, "coefs.npy"))
         pvalues = np.load(os.path.join(dirname, "pvalues.npy"))
 
-        n_validation = int(
-            dirname.split("n_validation_")[1].split("_n_s")[0])
-        _, df = compute_significativity(
-            pvalues, trust_level, vote_prop, n_validation, additional_data,
-            correct_threshold=True)
+        if select_good_models is not None:
+            coefs = coefs[model_indices]
+            pvalues = pvalues[model_indices]
+
+        if "-" in heuristic_strat:
+            first_param, second_param = heuristic_strat.split("-")
+            params = {"strategy": heuristic_strat,
+                      first_param: heuristic_params[0],
+                      second_param: heuristic_params[1]}
+            heuristic_param = {heuristic_name: params}
+            heuristic = Heuristic(heuristic_param, additional_data)
+        else:
+            params = {heuristic_strat : heuristic_params}
+            params = {"strategy": heuristic_strat,
+                      heuristic_strat : heuristic_params}
+            heuristic_param = {heuristic_name: params}
+            heuristic = Heuristic(heuristic_param, additional_data)
+
+        df = heuristic(coefs, pvalues, model_scores)
 
         areas = df["roi"][(df["metric"] == metric) & (df["score"] == score)].to_list()
         area_idx = [rois_names.index(f"{name}_{metric}") for name in areas]

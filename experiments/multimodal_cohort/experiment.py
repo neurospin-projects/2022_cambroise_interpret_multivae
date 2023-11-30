@@ -122,7 +122,7 @@ class MultimodalExperiment(BaseExperiment):
             else:
                 cp_epochs = np.array([int(path.split(os.sep)[-2]) for path in cp_files])
                 cp_file = cp_files[np.argmin(cp_epochs >= load_epoch)]
-            print(cp_file)
+            #print(cp_file)
             model.load_state_dict(torch.load(cp_file, map_location=flags.device))
 
         return experiment, flags

@@ -34,7 +34,7 @@ def create_dir_structure(flags, train=True):
     else:
         flags.dir_experiment_run = flags.dir_experiment;
 
-    print(flags.dir_experiment_run)
+    #print(flags.dir_experiment_run)
     if train:
         create_dir(flags.dir_experiment_run)
 
@@ -54,7 +54,7 @@ def create_dir_structure(flags, train=True):
             dir_logs = [flags.dir_logs]
         for dir in dir_logs:
             create_dir(dir)
-    print(flags.dir_logs)
+    #print(flags.dir_logs)
 
     flags.dir_logs_clf = os.path.join(flags.dir_experiment_run, 'logs_clf')
     if train:
