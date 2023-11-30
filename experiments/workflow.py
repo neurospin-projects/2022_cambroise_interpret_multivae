@@ -278,7 +278,7 @@ def multiple_train_exp(dataset, datasetdir, outdir, input_dims, n_runs, input_ch
     """
     print_title(f"MULTIPLETRAIN: {dataset}")
 
-    for run_idx in range(len(n_runs)):
+    for run_idx in range(n_runs):
         train_exp(dataset, datasetdir, outdir, input_dims, input_channels=3,
               input_ico_order=5, use_surface=False, num_models=1, latent_dim=20,
               style_dim=[3, 20], data_seed="defaults",
