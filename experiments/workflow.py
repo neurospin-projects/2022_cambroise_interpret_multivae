@@ -279,17 +279,17 @@ def multiple_train_exp(dataset, datasetdir, outdir, input_dims, n_runs, input_ch
     print_title(f"MULTIPLETRAIN: {dataset}")
 
     for run_idx in range(n_runs):
-        train_exp(dataset, datasetdir, outdir, input_dims, input_channels=3,
-              input_ico_order=5, use_surface=False, num_models=1, latent_dim=20,
-              style_dim=[3, 20], data_seed="defaults",
-              num_hidden_layer_encoder=1, num_hidden_layer_decoder=0,
-              allow_missing_blocks=True, factorized_representation=True,
-              likelihood="normal", learning_rate=0.002, batch_size=256,
-              num_epochs=1500, eval_freq=25, eval_freq_fid=100, beta=1.,
-              data_multiplications=1, dropout_rate=0., initial_out_logvar=-3.,
-              learn_output_scale=True, out_scale_per_subject=False,
-              method="joint_elbo", grad_scaling=False,
-              learn_output_covmatrix=[])
+        train_exp(dataset, datasetdir, outdir, input_dims, input_channels=input_channels,
+              input_ico_order=input_ico_order, use_surface=use_surface, num_models=num_models, latent_dim=latent_dim,
+              style_dim=style_dim, data_seed=data_seed,
+              num_hidden_layer_encoder=num_hidden_layer_encoder, num_hidden_layer_decoder=num_hidden_layer_decoder,
+              allow_missing_blocks=allow_missing_blocks, factorized_representation=factorized_representation,
+              likelihood=likelihood, learning_rate=learning_rate, batch_size=batch_size,
+              num_epochs=num_epochs, eval_freq=eval_freq, eval_freq_fid=eval_freq_fid, beta=beta,
+              data_multiplications=data_multiplications, dropout_rate=dropout_rate, initial_out_logvar=initial_out_logvar,
+              learn_output_scale=learn_output_scale, out_scale_per_subject=out_scale_per_subject,
+              method=method, grad_scaling=grad_scaling,
+              learn_output_covmatrix=learn_output_covmatrix)
 
 
 def daa_exp(dataset, datasetdir, outdir, run, sampling="likelihood",
