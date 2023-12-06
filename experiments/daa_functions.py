@@ -30,7 +30,8 @@ from stat_utils import make_regression
 from color_utils import (print_title, print_subtitle, print_text)
 
 
-def make_digital_avatars(outdir, run, params, additional_data, permuted=False):
+def make_digital_avatars(outdir, run, params, additional_data, permuted=False,
+                         verbose=False):
     """ Build the digital avatars using clinical scores taverses
     to influence the imaging part.
     Parameters
@@ -46,15 +47,15 @@ def make_digital_avatars(outdir, run, params, additional_data, permuted=False):
         additional usefull information
     """
 
-    print_subtitle("Computing digital avatars.")
+    print_subtitle("Computing digital avatars.", verbose)
     expdir = os.path.join(outdir, run)
     daadir = os.path.join(expdir, "daa")
     if not os.path.isdir(daadir):
         os.mkdir(daadir)
-    print_text(f"experimental directory: {expdir}")
-    print_text(f"DAA directory: {daadir}")
+    print_text(f"experimental directory: {expdir}", verbose)
+    print_text(f"DAA directory: {daadir}", verbose)
 
-    print_subtitle("Loading data...")
+    print_subtitle("Loading data...", verbose)
     flags_file = os.path.join(expdir, "flags.rar")
     if not os.path.isfile(flags_file):
         raise ValueError("You need first to train the model.")    
@@ -64,7 +65,7 @@ def make_digital_avatars(outdir, run, params, additional_data, permuted=False):
     n_models = experiment.flags.num_models
 
     modalities = ["clinical", "rois"]
-    print_text(f"modalities: {modalities}")
+    print_text(f"modalities: {modalities}", verbose)
 
     n_scores = len(additional_data.clinical_names)
     n_rois = len(additional_data.rois_names)
@@ -83,8 +84,8 @@ def make_digital_avatars(outdir, run, params, additional_data, permuted=False):
     metadata_file = os.path.join(resdir, "metadatas.npy")
     rois_reconstructions_file = os.path.join(resdir, "rois_reconstructions.npy")
     
-    print_text(f"number of ROIs: {n_rois}")
-    print_text(f"number of clinical scores: {n_scores}")
+    print_text(f"number of ROIs: {n_rois}", verbose)
+    print_text(f"number of clinical scores: {n_scores}", verbose)
     all_sampled_scores, all_metadatas, all_rois_reconstructions = [], [], []
     shape=(n_models, params.n_validation,
            params.n_subjects, n_scores, params.n_samples,
@@ -101,7 +102,7 @@ def make_digital_avatars(outdir, run, params, additional_data, permuted=False):
             trainset = trainset[model_idx]
             testset = testset[model_idx]
             model = model[model_idx]
-        print_text(f"train data: {len(trainset)}")
+        print_text(f"train data: {len(trainset)}", verbose)
         if flags.allow_missing_blocks:
             trainsampler = MissingModalitySampler(
                 trainset, batch_size=len(trainset))
@@ -111,11 +112,11 @@ def make_digital_avatars(outdir, run, params, additional_data, permuted=False):
             trainloader = DataLoader(
                 trainset, shuffle=True, batch_size=len(trainset), num_workers=0)
 
-        print_text(f"test data: {len(testset)}")
+        print_text(f"test data: {len(testset)}", verbose)
         testloader = DataLoader(
             testset, shuffle=True, batch_size=len(testset), num_workers=0)
 
-        print_subtitle("Evaluate model...")
+        print_subtitle("Evaluate model...", verbose)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = model.to(device)
         model.eval()
@@ -134,20 +135,20 @@ def make_digital_avatars(outdir, run, params, additional_data, permuted=False):
                 _data[f"z{phase}"] = model.inference(data)
                 _data[f"data{phase}"] = data
         latents = SimpleNamespace(**_data)
-        print_text(f"z train: {latents.ztrain['mus'].shape}")
-        print_text(f"z test: {latents.ztest['mus'].shape}")
+        print_text(f"z train: {latents.ztrain['mus'].shape}", verbose)
+        print_text(f"z test: {latents.ztest['mus'].shape}", verbose)
         subsets = list(latents.ztest["subsets"])
-        print_text(f"subsets: {subsets}")
+        print_text(f"subsets: {subsets}", verbose)
         trainset = latents.datatrain
         clinical_values = trainset["clinical"].cpu().detach().numpy()
 
-        print_subtitle("Create digital avatars models using artificial clinical scores...")
+        print_subtitle("Create digital avatars models using artificial clinical scores...", verbose)
         if params.sampling != "likelihood":
-            print_text("Build the artificial values using population level statistics")
+            print_text("Build the artificial values using population level statistics", verbose)
             min_per_score, max_per_score = np.quantile(
                 clinical_values, [0.05, 0.95], 0)
-            print_text(f"min range per score: {min_per_score}")
-            print_text(f"max range per score: {max_per_score}")
+            print_text(f"min range per score: {min_per_score}", verbose)
+            print_text(f"max range per score: {max_per_score}", verbose)
             if params.sampling == "linear":
                 scores_values = torch.FloatTensor(np.repeat(
                     np.linspace(min_per_score, max_per_score,
@@ -163,7 +164,7 @@ def make_digital_avatars(outdir, run, params, additional_data, permuted=False):
         else:
             print_text("Build the artificial values for each score by "
                     "sampling in the estimated output distribution "
-                    "for each subject.")
+                    "for each subject.", verbose)
 
         sampled_scores, metadatas, rois_reconstructions = [], [], []
         for val_idx in tqdm(range(params.n_validation)):
@@ -1042,9 +1043,11 @@ def compute_all_stability(results, daa_params, heuristic, strat_param_name,
         "daa_params": [], "heuristic": [], "strat_param": [], "metric": [],
         "score": [], "stability": [], "penalized_stability": []}
     for metric_idx, metric in enumerate(metrics):
+        metric_assoc0 = [assoc for assoc in all_assoc0 if metric in assoc]
+        metric_assoc1 = [assoc for assoc in all_assoc1 if metric in assoc]
         for score_idx, score in enumerate(scores):
-            local_assoc0 = [assoc for assoc in all_assoc0 if metric in assoc and score in assoc]
-            local_assoc1 = [assoc for assoc in all_assoc1 if metric in assoc and score in assoc]
+            local_assoc0 = [assoc for assoc in metric_assoc0 if score in assoc]
+            local_assoc1 = [assoc for assoc in metric_assoc1 if score in assoc]
             stability, penalized_stability = compute_stability(
                 local_assoc0, local_assoc1, ideal_N, measure=measure)
             stability_per_score_metric["daa_params"].append(daa_params)

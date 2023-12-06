@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import colors, lines
+from joblib import Parallel, delayed
 import pandas as pd
 import seaborn as sns
 from tqdm import tqdm
@@ -220,6 +221,7 @@ def evaluate_stability(dataset, datasetdir, outdir, runs=[],
             stability_per_score_metric = {
                 "daa_params": [], "heuristic": [], "strat_param": [], "metric": [],
                 "score": [], "stability": [], "penalized_stability": [], "comparison": []}
+            product_of_params = []
             for comparison_idx, comparison in enumerate(comparisons):
                 run_0, run_1 = comparison
                 run_0_idx = to_compare.index(run_0)
@@ -234,6 +236,9 @@ def evaluate_stability(dataset, datasetdir, outdir, runs=[],
                                 for strat_param in heuristics_params[heuristic][strategy]:
                                     strat_param_name = f"strategy_{strategy}_value_{strat_param}"
 
+                                    # product_of_params.append((
+                                    #     (run_0_idx, run_1_idx), daa_params,
+                                    #     heuristic, strat_param_name))
                                     local_stability_per_metric_score = (
                                         compute_all_stability(local_result,
                                                             daa_params,
@@ -251,7 +256,9 @@ def evaluate_stability(dataset, datasetdir, outdir, runs=[],
                                     heuristics_params[heuristic][first_param],
                                     heuristics_params[heuristic][second_param]):
                                     strat_param_name = f"strategy_{strategy}_values_{first_value}_{second_value}"
-
+                                    # product_of_params.append(
+                                    #     ((run_0_idx, run_1_idx), daa_params,
+                                    #     heuristic, strat_param_name))
                                     local_stability_per_metric_score = (
                                         compute_all_stability(local_result,
                                                             daa_params,
@@ -263,7 +270,20 @@ def evaluate_stability(dataset, datasetdir, outdir, runs=[],
                                     local_stability_per_metric_score["comparison"] = [comparison for _ in range(len(metrics) * len(scores))]
                                     for key, value in stability_per_score_metric.items():
                                         value += local_stability_per_metric_score[key]
+            # delayed_results = Parallel(n_jobs=-2, verbose=1)(
+            #     delayed(compute_all_stability)(
+            #         (result[res_idx[0]], result[res_idx[1]]),
+            #         daa_params, heuristic, strat_param_name,
+            #         ideal_N, metrics, scores, stability_measure)
+            #         for res_idx, daa_params, heuristic, strat_param_name in
+            #         product_of_params)
 
+            # for params_idx, all_params in enumerate(product_of_params):
+            #     local_stability_per_metric_score = delayed_results[params_idx]
+            #     local_stability_per_metric_score["comparison"] = [comparison for _ in range(len(metrics) * len(scores))]
+            #     for key, value in stability_per_score_metric.items():
+            #         value += local_stability_per_metric_score[key]
+            
             stability_per_score_metric = pd.DataFrame.from_dict(stability_per_score_metric)
             # print(stability_per_score_metric.sort_values("penalized_stability", ascending=False))
             # print(final_stability.sort_values("penalized_stability", ascending=False))

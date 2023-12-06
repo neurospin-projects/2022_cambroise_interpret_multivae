@@ -162,6 +162,8 @@ def train_exp(dataset, datasetdir, outdir, input_dims, input_channels=3,
     mst = MultimodalExperiment(flags)
     mst.set_optimizers()
     run_epochs(mst)
+    del mst.train
+    del mst.test
     print(f"Run {flags.dir_experiment_run.split('/')[-1]} trained.")
 
     if os.path.exists(os.path.join(flags.dir_experiment, "runs.tsv")):
@@ -294,8 +296,8 @@ def multiple_train_exp(dataset, datasetdir, outdir, input_dims, n_runs, input_ch
 
 def daa_exp(dataset, datasetdir, outdir, run, sampling="likelihood",
             n_validation=5, n_samples=200, n_subjects=50,
-            M=1000, trust_level=0.75, seed=1037, reg_method="hierarchical",
-            sample_latents=True, vote_prop=1):
+            M=1000, seed=1037, reg_method="hierarchical",
+            sample_latents=True, verbose=False):
     """ Perform the digital avatars analysis using clinical scores taverses
     to influence the imaging part.
     Parameters
@@ -331,15 +333,15 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling="likelihood",
         raise ValueError("sampling_strategy must be either linear, uniform"
                          "gaussian or likelihood")
 
-    print_title(f"DIGITAL AVATARS ANALYSIS: {dataset}")
+    print_title(f"DIGITAL AVATARS ANALYSIS: {dataset}", verbose)
     expdir = os.path.join(outdir, run)
     daadir = os.path.join(expdir, "daa")
     if not os.path.isdir(daadir):
         os.mkdir(daadir)
-    print_text(f"experimental directory: {expdir}")
-    print_text(f"DAA directory: {daadir}")
+    print_text(f"experimental directory: {expdir}", verbose)
+    print_text(f"DAA directory: {daadir}", verbose)
 
-    print_subtitle("Loading data...")
+    print_subtitle("Loading data...", verbose)
     flags_file = os.path.join(expdir, "flags.rar")
     if not os.path.isfile(flags_file):
         raise ValueError("You need first to train the model.")    
@@ -357,7 +359,7 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling="likelihood",
         os.path.join(datasetdir, "metadata_train.tsv"))
     metadata_columns = metadata.columns.tolist()
     modalities = ["clinical", "rois"]
-    print_text(f"modalities: {modalities}")
+    print_text(f"modalities: {modalities}", verbose)
 
     n_scores = len(clinical_names)
     n_rois = len(rois_names)
@@ -384,20 +386,10 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling="likelihood",
     pvals_file = os.path.join(resdir, "pvalues.npy")
 
     if not os.path.exists(da_file):
-        make_digital_avatars(outdir, run, params, additional_data)
+        make_digital_avatars(outdir, run, params, additional_data, verbose)
     if not os.path.exists(pvals_file):
         compute_daa_statistics(outdir, run, params, additional_data)
 
-    pvalues = np.load(pvals_file)
-
-    print_subtitle("Compute statistics significativity...")
-    idx_sign, significant_assoc = compute_significativity(
-        pvalues, trust_level, vote_prop, n_validation, additional_data,
-        correct_threshold=True)
-
-    significant_file = os.path.join(resdir, "significant_rois.tsv")
-    significant_assoc.to_csv(significant_file, sep="\t", index=False)
-    print_result(f"significant ROIs: {significant_file}")
 
 
 def anova_exp(dataset, datasetdir, outdir, run, n_validation=5,

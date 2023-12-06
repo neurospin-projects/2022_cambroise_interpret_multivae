@@ -696,41 +696,48 @@ def attr(color):
     return colored(color).attribute()
 
 
-def print_title(title):
-    if IS_COLOR_TERM:
-        title = stylize(title, fg(fg_colors["title"]) + attr("bold"))
-    print(title)
+def print_title(title, verbose=True):
+    if verbose:
+        if IS_COLOR_TERM:
+            title = stylize(title, fg(fg_colors["title"]) + attr("bold"))
+        print(title)
 
 
-def print_subtitle(title):
-    if IS_COLOR_TERM:
-        title = stylize(title, fg(fg_colors["subtitle"]))
-    print(title)
+def print_subtitle(title, verbose=True):
+    if verbose:
+        if IS_COLOR_TERM:
+            title = stylize(title, fg(fg_colors["subtitle"]))
+        print(title)
 
 
-def print_command(command):
-    if IS_COLOR_TERM:
-        command = stylize(command, fg(fg_colors["command"]))
-    print(command)
+def print_command(command, verbose=True):
+    if verbose:
+        if IS_COLOR_TERM:
+            command = stylize(command, fg(fg_colors["command"]))
+        print(command)
 
 
-def print_result(result):
-    if IS_COLOR_TERM:
-        result = stylize(result, fg(fg_colors["result"]))
-    print(result)
+def print_result(result, verbose=True):
+    if verbose:
+        if IS_COLOR_TERM:
+            result = stylize(result, fg(fg_colors["result"]))
+        print(result)
 
 
-def print_error(error):
-    if IS_COLOR_TERM:
-        error = stylize(error, fg(fg_colors["error"]))
-    print(error)
+def print_error(error, verbose=True):
+    if verbose:
+        if IS_COLOR_TERM:
+            error = stylize(error, fg(fg_colors["error"]))
+        print(error)
 
 
-def print_text(text):
-    if IS_COLOR_TERM:
-        text = stylize(text, fg(fg_colors["text"]))
-    print(text)
+def print_text(text, verbose=True):
+    if verbose:
+        if IS_COLOR_TERM:
+            text = stylize(text, fg(fg_colors["text"]))
+        print(text)
 
-def print_flags(flags):
-    for key, value in vars(flags).items():
-        print(f"{key} : {value}")
+def print_flags(flags, verbose=True):
+    if verbose:
+        for key, value in vars(flags).items():
+            print(f"{key} : {value}")
