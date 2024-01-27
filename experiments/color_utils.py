@@ -17,6 +17,7 @@ import platform
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import plotly.express as px
+import copy
 
 
 IS_WINDOWS = platform.system() == "Windows"
@@ -66,6 +67,34 @@ def plotly_to_plt_rgb(color):
         color_tuple = tuple(color.split("(")[1].split(")")[0].split(","))
         new_color_tuple = tuple(float(color) if float(color) <= 1 else float(color) / 256 for color in color_tuple)
     return new_color_tuple
+
+def rois_to_colors(rois, roi_color_mapping):
+    """ Builds the list of colors corresponding to rois, provided a roi-color
+    mapping
+    """
+    mapping = copy.deepcopy(roi_color_mapping)
+    colors = []
+    for roi in rois:
+        roi, hemisphere = roi.rsplit("_", 1)
+        mapping_keys = [key.split("_")[1] for key in mapping.keys() if
+                        hemisphere in key]
+        for key in mapping_keys:
+            if key in roi:
+                color_list = mapping[hemisphere + "_" + key]
+                color = color_list[0]
+                color_name, indices = color.split("_")
+                start_idx, end_idx = indices.split("-")
+                start_idx, end_idx = int(start_idx), int(end_idx)
+                color = get_color_list(color_name)[start_idx:end_idx][0]
+                colors.append(color)
+                start_idx += 1
+                if start_idx == end_idx:
+                    del mapping[hemisphere + "_" + key][0]
+                else:
+                    mapping[hemisphere + "_" + key][0] = f"{color_name}_{start_idx}-{end_idx}"
+                break
+    return colors
+
 
 # Dictionary of term colors used for printing to terminal
 fg_colors = {

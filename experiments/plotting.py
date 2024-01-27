@@ -19,11 +19,13 @@ from tqdm import tqdm
 import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib.patches as mpatches
 from scipy.stats import ttest_1samp
 from scipy.stats import ttest_ind as ttest
 from utils import plot
 from color_utils import (print_result, plt_to_plotly_rgb, plotly_to_plt_rgb,
                          get_color_list)
+from multimodal_cohort.constants import short_roi_names
 from nilearn import plotting, datasets
 
 
@@ -196,6 +198,28 @@ def plot_surf_mosaic(data, titles, fsaverage, filename, label=True, color_name="
     print_result(f"surface mosaic: {filename}")
 
 
+def short_roi_name(roi_name):
+    short_name = "L." if roi_name.endswith("lh") else "R."
+    if "G_Ins_lg&S_cent_ins" in roi_name:
+        return short_name + "G.Ins.Lg.S.Cent.Ins"
+    elif "S_oc-temp_med&Lingual" in roi_name:
+        return short_name + "S.Oc.Te.Med.Ling"
+    types = {"G&S": "", "G":"G.", "S": "S.", "Pole": "Pole.", "Lat": "Lat."}
+    short_name += types[roi_name.split("_", 1)[0]]
+    decomposed_roi_name = roi_name.split("_")[1:-1]
+    fully_decomposed_name = []
+    for name in decomposed_roi_name:
+        fully_decomposed_name += name.split("-")
+    for name_idx, name in enumerate(fully_decomposed_name):
+        try:
+            short_name += short_roi_names[name]
+        except:
+            print(name)
+            print(roi_name)
+        if name_idx < len(fully_decomposed_name) - 1 and short_roi_names[name] != "":
+            short_name += "."
+    return short_name
+
 def nilearn_labels_to_feature_names(labels):
     features = [label.decode().replace("_and_", "&")
                 for label in labels]
@@ -203,7 +227,8 @@ def nilearn_labels_to_feature_names(labels):
     rh_features = ["{}_rh".format(item) for item in features]
     return lh_features, rh_features
 
-def plot_areas(areas, colors, filename=None, color_name="Plotly", inflated=True):
+def plot_areas(areas, colors, filename=None, inflated=True,
+               save_legend=False):
     destrieux = datasets.fetch_atlas_surf_destrieux()    
     fsaverage = datasets.fetch_surf_fsaverage()
     lh_features, rh_features = nilearn_labels_to_feature_names(
@@ -212,21 +237,108 @@ def plot_areas(areas, colors, filename=None, color_name="Plotly", inflated=True)
     lh_map = np.zeros(destrieux["map_left"].shape)
     rh_map = np.zeros(destrieux["map_right"].shape)
 
-    color_palette = get_color_list(color_name, len("areas"))
-    color_palette = [plotly_to_plt_rgb(color) for color in color_palette]
+    # color_palette = get_color_list(color_name)#, len(areas))
+    color_palette = [plotly_to_plt_rgb(color) for color in colors]
     mymap = mcolors.ListedColormap(color_palette)
     n_colors = len(color_palette)
+    color_values = np.arange(len(areas)) + 0.01
+    for idx, roi_name in enumerate(areas):
+        if "lh" in roi_name:
+            roi_index = lh_features.index(roi_name)
+            roi_surface_indices = (destrieux["map_left"] == roi_index)
+            lh_map[roi_surface_indices] = color_values[idx]
+        else:
+            roi_index = rh_features.index(roi_name)
+            roi_surface_indices = (destrieux["map_right"] == roi_index)
+            rh_map[roi_surface_indices] = color_values[idx]
+    fig_width = 10
+    fig, axs = plt.subplots(2, 2, figsize=(fig_width, 3/4 * fig_width),
+                            subplot_kw={"projection": "3d"})
+    alpha = 1
+    bg_darkness = 0.4
+    template = "pial"
+    if inflated:
+        template = "infl"
+    plotting.plot_surf_roi(fsaverage['{}_left'.format(template)], roi_map=lh_map,
+                       hemi='left', view='lateral', cmap=mymap,
+                       bg_map=fsaverage['sulc_left'], bg_on_data=False,
+                       axes=axs[0, 0], alpha=alpha, figure=fig,
+                       vmin=0, vmax=n_colors,
+                       darkness=bg_darkness)
+    plotting.plot_surf_roi(fsaverage['{}_left'.format(template)], roi_map=lh_map,
+                       hemi='left', view='medial', cmap=mymap,
+                       bg_map=fsaverage['sulc_left'], bg_on_data=False,
+                       axes=axs[1, 0], alpha=alpha, figure=fig,
+                       vmin=0, vmax=n_colors,
+                       darkness=bg_darkness)
+    plotting.plot_surf_roi(fsaverage['{}_right'.format(template)], roi_map=rh_map,
+                       hemi='right', view='lateral', cmap=mymap,
+                       bg_map=fsaverage['sulc_right'], bg_on_data=False,
+                       axes=axs[0, 1], alpha=alpha, figure=fig,
+                       vmin=0, vmax=n_colors,
+                       darkness=bg_darkness)
+    plotting.plot_surf_roi(fsaverage['{}_right'.format(template)], roi_map=rh_map,
+                       hemi='right', view='medial', cmap=mymap,
+                       bg_map=fsaverage['sulc_right'], bg_on_data=False,
+                       axes=axs[1, 1], alpha=alpha, figure=fig,
+                       vmin=0, vmax=n_colors,
+                       darkness=bg_darkness)
+    axs[1, 0].text(0, -100, 110, s="L", fontweight="bold", fontsize=36,
+                   fontfamily="sans-serif")
+    axs[1, 1].text(0, -80, 110, s="R", fontweight="bold", fontsize=36,
+                   fontfamily="sans-serif")
+    fig.tight_layout(pad=-5)
+    if filename is not None:
+        fig.savefig(filename)
+    if save_legend:
+        legend_fig = plt.figure(figsize=(10, 2))
+        legend_filename = (filename.rsplit(".", 1)[0] + "_legend." +
+                           filename.rsplit(".", 1)[1])
+        plotted_colors = np.array(color_palette[:len(colors)])
+        plt.rcParams.update({'font.size': 28, "font.family": "serif"})
+        plotted_areas = [short_roi_name(area) for area in areas]
+        plotted_colors = plotted_colors[np.argsort(plotted_areas)]
+        plotted_areas = np.sort(plotted_areas)
+        handles = [mpatches.Patch(color=plotted_colors[area_idx],
+                                  label=area)
+                   for area_idx, area in enumerate(plotted_areas)]
+        # labels = [short_roi_name(area) for area in areas]
+        legend = legend_fig.legend(handles=handles, loc=3,
+                            framealpha=1, frameon=True, ncols=5,
+                            edgecolor="black")
+        legend_fig.canvas.draw()
+        bbox  = legend.get_window_extent()
+        expand = [-20, -20, 20, 20]
+        bbox = bbox.from_extents(*(bbox.extents + np.array(expand)))
+        bbox = bbox.transformed(legend_fig.dpi_scale_trans.inverted())
+        legend_fig.tight_layout()
+        legend_fig.savefig(legend_filename, dpi=200, bbox_inches=bbox)
+    return fig
+
+
+def plot_areas_signs(areas, signs, filename=None, colors=[(0,0,1,1),(1,0,0,1)], inflated=True):
+    destrieux = datasets.fetch_atlas_surf_destrieux()    
+    fsaverage = datasets.fetch_surf_fsaverage()
+    lh_features, rh_features = nilearn_labels_to_feature_names(
+        destrieux["labels"])
+    print("-- features", len(lh_features), len(rh_features))
+    lh_map = np.zeros(destrieux["map_left"].shape)
+    rh_map = np.zeros(destrieux["map_right"].shape)
+
+    mymap = mcolors.ListedColormap(colors)
    
     for idx, roi_name in enumerate(areas):
         if "lh" in roi_name:
             roi_index = lh_features.index(roi_name)
             roi_surface_indices = (destrieux["map_left"] == roi_index)
-            lh_map[roi_surface_indices] = colors[idx]
+            lh_map[roi_surface_indices] = signs[idx]
         else:
             roi_index = rh_features.index(roi_name)
             roi_surface_indices = (destrieux["map_right"] == roi_index)
-            rh_map[roi_surface_indices] = colors[idx]
-    fig, axs = plt.subplots(2, 2, subplot_kw={"projection": "3d"})
+            rh_map[roi_surface_indices] = signs[idx]
+    fig_width = 10
+    fig, axs = plt.subplots(2, 2, figsize=(fig_width, 3/4 * fig_width),
+                            subplot_kw={"projection": "3d"})
     alpha = 1
     bg_darkness = 0.4
     template = "pial"
@@ -235,30 +347,36 @@ def plot_areas(areas, colors, filename=None, color_name="Plotly", inflated=True)
     plotting.plot_surf_roi(fsaverage['{}_left'.format(template)], roi_map=lh_map,
                        hemi='left', view='lateral', cmap=mymap,
                        bg_map=fsaverage['sulc_left'], bg_on_data=True,
-                       axes=axs[0, 0], alpha=alpha,
-                       vmin=0, vmax=n_colors,
+                       axes=axs[0, 0], alpha=alpha, figure=fig,
+                       vmin=0, vmax=1,
                        darkness=bg_darkness)
     plotting.plot_surf_roi(fsaverage['{}_left'.format(template)], roi_map=lh_map,
                        hemi='left', view='medial', cmap=mymap,
                        bg_map=fsaverage['sulc_left'], bg_on_data=True,
-                       axes=axs[0, 1], alpha=alpha,
-                       vmin=0, vmax=n_colors,
+                       axes=axs[1, 0], alpha=alpha, figure=fig,
+                       vmin=0, vmax=1,
                        darkness=bg_darkness)
     plotting.plot_surf_roi(fsaverage['{}_right'.format(template)], roi_map=rh_map,
                        hemi='right', view='lateral', cmap=mymap,
                        bg_map=fsaverage['sulc_right'], bg_on_data=True,
-                       axes=axs[1, 0], alpha=alpha,
-                       vmin=0, vmax=n_colors,
+                       axes=axs[0, 1], alpha=alpha, figure=fig,
+                       vmin=0, vmax=1,
                        darkness=bg_darkness)
     plotting.plot_surf_roi(fsaverage['{}_right'.format(template)], roi_map=rh_map,
                        hemi='right', view='medial', cmap=mymap,
                        bg_map=fsaverage['sulc_right'], bg_on_data=True,
-                       axes=axs[1, 1], alpha=alpha,
-                       vmin=0, vmax=n_colors,
+                       axes=axs[1, 1], alpha=alpha, figure=fig,
+                       vmin=0, vmax=1,
                        darkness=bg_darkness)
+    axs[1, 0].text(0, -100, 110, s="L", fontweight="bold", fontsize=36,
+                   fontfamily="sans-serif")
+    axs[1, 1].text(0, -80, 110, s="R", fontweight="bold", fontsize=36,
+                   fontfamily="sans-serif")
+    fig.tight_layout(pad=-3)
     if filename is not None:
         fig.savefig(filename)
     return fig
+
 
 def plot_coefs(bar_names, coefs, errors=None, filename=None, color_name="Plotly"):
     fig = plt.figure(figsize=(10, 7.5))

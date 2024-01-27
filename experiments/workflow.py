@@ -21,6 +21,7 @@ from numpy.lib.format import open_memmap
 import pandas as pd
 from tqdm import tqdm
 import statsmodels.api as sm
+import statsmodels.formula.api as smf
 from statsmodels.stats.anova import anova_lm
 from types import SimpleNamespace
 import torch
@@ -204,7 +205,8 @@ def retrain_exp(dataset, datasetdir, outdir, run):
         raise ValueError("You need first to train the model.")
     checkpoints_dir = os.path.join(expdir, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
-        flags_file, checkpoints_dir)
+        flags_file, checkpoints_dir, datasetdir=datasetdir,
+        outdir=outdir)
     experiment.set_optimizers()
     n_models = experiment.flags.num_models
     for model_idx in range(n_models):
@@ -297,7 +299,7 @@ def multiple_train_exp(dataset, datasetdir, outdir, input_dims, n_runs, input_ch
 def daa_exp(dataset, datasetdir, outdir, run, sampling="likelihood",
             n_validation=5, n_samples=200, n_subjects=50,
             M=1000, seed=1037, reg_method="hierarchical",
-            sample_latents=True, verbose=False):
+            sample_latents=True, save_all_coefs=False, verbose=False):
     """ Perform the digital avatars analysis using clinical scores taverses
     to influence the imaging part.
     Parameters
@@ -347,7 +349,8 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling="likelihood",
         raise ValueError("You need first to train the model.")    
     checkpoints_dir = os.path.join(expdir, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
-        flags_file, checkpoints_dir)
+        flags_file, checkpoints_dir, datasetdir=datasetdir,
+        outdir=outdir)
     n_models = experiment.flags.num_models
     print_flags(flags)
 
@@ -386,9 +389,9 @@ def daa_exp(dataset, datasetdir, outdir, run, sampling="likelihood",
     pvals_file = os.path.join(resdir, "pvalues.npy")
 
     if not os.path.exists(da_file):
-        make_digital_avatars(outdir, run, params, additional_data, verbose)
+        make_digital_avatars(datasetdir, outdir, run, params, additional_data, verbose)
     if not os.path.exists(pvals_file):
-        compute_daa_statistics(outdir, run, params, additional_data)
+        compute_daa_statistics(datasetdir, outdir, run, params, additional_data, save_all_coefs)
 
 
 
@@ -507,7 +510,7 @@ def anova_exp(dataset, datasetdir, outdir, run, n_validation=5,
     print(anova_pvalues[:, :, idx_sign].mean((0, 1)).max())
 
 def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_subjects=301,
-            sample_latents=False):
+            sample_latents=False, verbose=True, save_all=False):
     """ Perform Representational Similarity Analysis (RSA) on estimated
     latent representations.
     Parameters
@@ -530,27 +533,37 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_subjects=301,
         optionally specify a seed to control expriment reproducibility, set
         to None for randomization.
     """
-    print_title(f"RSA ANALYSIS: {dataset}")
+    print_title(f"RSA ANALYSIS: {dataset}", verbose)
     expdir = os.path.join(outdir, run)
     rsadir = os.path.join(expdir, "rsa")
     if not os.path.isdir(rsadir):
         os.mkdir(rsadir)
-    print_text(f"experimental directory: {expdir}")
-    print_text(f"RSA directory: {rsadir}")
+    print_text(f"experimental directory: {expdir}", verbose)
+    print_text(f"RSA directory: {rsadir}", verbose)
 
-    print_subtitle("Loading data...")
+    params = SimpleNamespace(
+        n_validation=n_validation, n_subjects=n_subjects,
+        sample_latents=sample_latents)
+    name = "_".join(["_".join([key, str(val)])
+                     for key, val in params.__dict__.items()])
+    resdir = os.path.join(rsadir, name)
+    if not os.path.isdir(resdir):
+        os.mkdir(resdir)
+
+    print_subtitle("Loading data...", verbose)
     flags_file = os.path.join(expdir, "flags.rar")
     if not os.path.isfile(flags_file):
         raise ValueError("You need first to train the model.")
     checkpoints_dir = os.path.join(expdir, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
-        flags_file, checkpoints_dir)
+        flags_file, checkpoints_dir, datasetdir=datasetdir,
+        outdir=outdir)
 
     n_models = flags.num_models
     clinical_names = np.load(
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
     modalities = ["clinical", "rois"]
-    print_text(f"modalities: {modalities}")
+    print_text(f"modalities: {modalities}", verbose)
     cov_names = ["age", "sex", "site"]
     if dataset == "euaims":
         cov_names.append("fsiq")
@@ -567,10 +580,10 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_subjects=301,
             trainset = trainset[model_idx]
             testset = testset[model_idx]
             model = model[model_idx]
-        print_text(f"train data: {len(trainset)}")
-        print_text(f"test data: {len(testset)}")
+        print_text(f"train data: {len(trainset)}", verbose)
+        print_text(f"test data: {len(testset)}", verbose)
 
-        print_subtitle("Compute blocks correlations using Kendall tau statstic...")
+        print_subtitle("Compute blocks correlations using Kendall tau statstic...", verbose)
         cov_names = ["age", "sex", "site"]
         if dataset == "euaims":
             cov_names.append("fsiq")
@@ -583,7 +596,7 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_subjects=301,
         scores_disimilarities.append([])
         for val_idx in tqdm(range(n_validation)):
             testloader = DataLoader(
-                testset, batch_size=n_subjects, shuffle=True, num_workers=0)
+                testset, batch_size=n_subjects, shuffle=True, num_workers=8)
             data = {}
             dataiter = iter(testloader)
             while True:
@@ -612,12 +625,12 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_subjects=301,
                     latents = latents[0]
                 if latents is not None:
                     latents = latents.cpu().detach().numpy()
-                    print_text(f"latents: {latents.shape}")
+                    print_text(f"latents: {latents.shape}", verbose)
                     n_scores = data["clinical"].shape[1]
                     n_subjects = len(latents)
                     cmat = data2cmat(latents)
                     latent_disimilarities[model_idx].append(cmat)
-                    print_text(f"(dis)similarity matrix: {cmat.shape}")
+                    print_text(f"(dis)similarity matrix: {cmat.shape}", verbose)
                     scores_cmats = []
                     for score_idx in range(n_scores):
                         score_cmat = vec2cmat(data["clinical"][:, score_idx].detach().cpu())
@@ -634,22 +647,24 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_subjects=301,
                         kendalltaus[model_idx, latent_idx, val_idx, n_scores + cov_idx, 1] = pval
                 scores_cmats = np.asarray(scores_cmats)
                 scores_disimilarities[model_idx].append(scores_cmats)
-                print_text(f"scores (dis)similarity matricies: {scores_cmats.shape}")
+                print_text(f"scores (dis)similarity matricies: {scores_cmats.shape}", verbose)
     latent_disimilarities = np.asarray(latent_disimilarities)
-    print_text(f"latent disimilarities: {latent_disimilarities.shape}")
+    print_text(f"latent disimilarities: {latent_disimilarities.shape}", verbose)
     scores_disimilarities = np.asarray(scores_disimilarities)
-    print_text(f"scores disimilarities: {scores_disimilarities.shape}")
-    stats_file = os.path.join(rsadir, "kendalltau_stats.npy")
+    print_text(f"scores disimilarities: {scores_disimilarities.shape}", verbose)
+    stats_file = os.path.join(resdir, "kendalltau_stats.npy")
     np.save(stats_file, kendalltaus)
-    print_result(f"kendall tau statistics: {stats_file}")
-    latdis_file = os.path.join(rsadir, "latent_dissimilarity.npy")
-    np.save(latdis_file, latent_disimilarities)
-    print_result(f"latent disimilarities: {latdis_file}")
-    scdis_file = os.path.join(rsadir, "scores_dissimilarity.npy")
-    np.save(scdis_file, scores_disimilarities)
-    print_result(f"scores_dissimilarity: {scdis_file}")
+    print_result(f"kendall tau statistics: {stats_file}", verbose)
+    latdis_file = os.path.join(resdir, "latent_dissimilarity.npy")
+    if save_all:
+        np.save(latdis_file, latent_disimilarities)
+    print_result(f"latent disimilarities: {latdis_file}", verbose)
+    scdis_file = os.path.join(resdir, "scores_dissimilarity.npy")
+    if save_all:
+        np.save(scdis_file, scores_disimilarities)
+    print_result(f"scores_dissimilarity: {scdis_file}", verbose)
 
-    print_subtitle("Summarize Kendall tau statstics...")
+    print_subtitle("Summarize Kendall tau statstics...", verbose)
     for latent_idx, latent_name in enumerate(latent_names):
         data = {"score": [], "pval": [], "pval_std": [], "r": [], "r_std": []}
         for score_idx in range(n_scores):
@@ -665,10 +680,134 @@ def rsa_exp(dataset, datasetdir, outdir, run, n_validation=1, n_subjects=301,
             data["r"].append(np.mean(kendalltaus[:, latent_idx, :, n_scores + cov_idx, 0]))
             data["r_std"].append(np.std(kendalltaus[:, latent_idx, :, n_scores + cov_idx, 0]))
         df = pd.DataFrame.from_dict(data)
-        summary_file = os.path.join(rsadir, f"kendalltau_{latent_name}.tsv")
+        summary_file = os.path.join(resdir, f"kendalltau_{latent_name}.tsv")
         df.to_csv(summary_file, sep="\t", index=False)
-        print_result(f"kendall tau summary: {summary_file}")
+        print_result(f"kendall tau summary: {summary_file}", verbose)
+        if verbose:
+            print(df.groupby(["score"]).apply(lambda e: e[:]))
+
+
+def multiple_rsa_exps(dataset, datasetdir, outdir, runs, n_validation=1,
+                      n_subjects=301, sample_latents=False, aggregate_pvals=False):
+    """ Perform Representational Similarity Analysis (RSA) on estimated
+    latent representations.
+    Parameters
+    ----------
+    dataset: str
+        the dataset name: euaims or hbn.
+    datasetdir: str
+        the path to the dataset associated data.
+    outdir: str
+        the destination folder.
+    run: str
+        the name of the experiment in the destination folder:
+        `<dataset>_<timestamp>'.
+    n_validation: int, default 50
+        the number of times we repeat the experiments.
+    n_subjects: int, default 50
+        the number of samples for each clinical score used to compute the
+        (dis)similarity matrices.
+    seed: int, default 1037
+        optionally specify a seed to control expriment reproducibility, set
+        to None for randomization.
+    """
+    clinical_names = np.load(
+        os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
+    n_scores = len(clinical_names)
+    modalities = ["clinical", "rois"]
+    print_text(f"modalities: {modalities}")
+    cov_names = ["age", "sex", "site"]
+    if dataset == "euaims":
+        cov_names.append("fsiq")
+    categorical_covs = ["sex", "site"]
+    latent_names = ["joint", "clinical_rois", "clinical_style", "rois_style"]
+
+    params = SimpleNamespace(
+        n_validation=n_validation, n_subjects=n_subjects,
+        sample_latents=sample_latents)
+    name = "_".join(["_".join([key, str(val)])
+                     for key, val in params.__dict__.items()])
+
+    all_kendalltaus = []
+    for run in runs:
+        expdir = os.path.join(outdir, run)
+        rsadir = os.path.join(expdir, "rsa")
+        resdir = os.path.join(rsadir, name)
+        stats_file = os.path.join(resdir, "kendalltau_stats.npy")
+        if not os.path.exists(stats_file):
+            rsa_exp(dataset, datasetdir, outdir, run, n_validation, n_subjects, sample_latents, False)
+        kendalltaus = np.load(stats_file)
+        all_kendalltaus.append(kendalltaus)
+    kendalltaus = np.array(all_kendalltaus)
+    for latent_idx, latent_name in enumerate(latent_names):
+        data = {"score": [], "pval": [], "r": [], "r_std": []}
+        if aggregate_pvals:
+            data["pval_std"] = []
+        for score_idx in range(n_scores):
+            data["score"].append(clinical_names[score_idx])
+            if aggregate_pvals:
+                data["pval"].append(np.mean(kendalltaus[:, :, latent_idx, :, score_idx, 1]))
+                data["pval_std"].append(np.std(kendalltaus[:, :, latent_idx, :, score_idx, 1], axis=0).mean())
+            else:
+                df = pd.DataFrame(
+                    {"kendalltau": kendalltaus[:, :, latent_idx, :, score_idx, 0].squeeze().flatten(),
+                     "split": np.array([[list(range(kendalltaus.shape[1]))] * n_validation] * len(kendalltaus)).squeeze().flatten(),
+                     "model": np.array([[list(range(len(kendalltaus)))] * n_validation ] * kendalltaus.shape[1]).squeeze().flatten()})
+                # results = make_regression(df, "1", "kendalltau", groups_name="split", method="hierarchical")
+                # data["pval"].append(results[0])
+                est = smf.mixedlm("kendalltau ~ 1", data=df, groups=df[["split", "model"]],
+                                  re_formula="~1")
+                results = est.fit()
+                data["pval"].append(results.pvalues["Intercept"])
+            data["r"].append(np.mean(kendalltaus[:, :, latent_idx, :, score_idx, 0]))
+            data["r_std"].append(np.std(kendalltaus[:, :, latent_idx, :, score_idx, 0], axis=0).mean())
+        for cov_idx, cov_name in enumerate(cov_names):
+            data["score"].append(cov_name)
+            if aggregate_pvals:
+                data["pval"].append(np.mean(kendalltaus[:, :, latent_idx, :, n_scores + cov_idx, 1]))
+                data["pval_std"].append(np.std(kendalltaus[:, :, latent_idx, :, n_scores + cov_idx, 1], axis=0).mean())
+            else:
+                df = pd.DataFrame(
+                    {"kendalltau": kendalltaus[:, :, latent_idx, :, n_scores + cov_idx, 0].squeeze().flatten(),
+                     "split": np.array([[list(range(kendalltaus.shape[1]))] * n_validation] * len(kendalltaus)).squeeze().flatten(),
+                     "model": np.array([[list(range(len(kendalltaus)))] * n_validation ] * kendalltaus.shape[1]).squeeze().flatten()})
+                # results = make_regression(df, "1", "kendalltau", groups_name="split", method="hierarchical")
+                # data["pval"].append(results[0])
+                est = smf.mixedlm("kendalltau ~ 1", data=df, groups=df[["split", "model"]],
+                                  re_formula="~1")
+                results = est.fit()
+                data["pval"].append(results.pvalues["Intercept"])
+            data["r"].append(np.mean(kendalltaus[:, :, latent_idx, :, n_scores + cov_idx, 0]))
+            data["r_std"].append(np.std(kendalltaus[:, :, latent_idx, :, n_scores + cov_idx, 0], axis=0).mean())
+        df = pd.DataFrame.from_dict(data)
+        print(f"RSA results for latent space {latent_name} :")
         print(df.groupby(["score"]).apply(lambda e: e[:]))
+    import matplotlib.pyplot as plt
+    plot_pvals = False
+    def plot_hist(values, logscale=False):
+        if logscale:
+            print((values == 0).sum())
+            values = values[values != 0]
+            hist, bins = np.histogram(np.log10(values), bins=20)
+            plt.hist(values, bins=np.power(10, bins), stacked=True, edgecolor="white")#logbins)
+            plt.xscale('log')
+        else:
+            plt.hist(values, bins=20, edgecolor="white")
+        # plt.title("Histogram of $p$-values")
+        # plt.legend(title="Run")
+        plt.xlabel("values" if not plot_pvals else "log10 pvalues")
+    plot_hist(kendalltaus[:, :, 3, :, n_scores, int(plot_pvals)].flatten(), logscale=plot_pvals)
+    plt.title("roi-age")
+    plt.figure()
+    plot_hist(kendalltaus[:, :, 3, :, 5, int(plot_pvals)].flatten(), logscale=plot_pvals)
+    plt.title(f"roi-{clinical_names[5]}")
+    plt.figure()
+    plot_hist(kendalltaus[:, :, 0, :, 5, int(plot_pvals)].flatten(), logscale=plot_pvals)
+    plt.title(f"joint-{clinical_names[5]}")
+    plt.figure()
+    plot_hist(kendalltaus[:, :, 0, :, n_scores + 2, int(plot_pvals)].flatten(), logscale=plot_pvals)
+    plt.title("joint-site")
+    plt.show()
 
 
 def hist_plot_exp(datasets, datasetdirs, scores, outdir):
@@ -796,7 +935,8 @@ def daa_plot_most_connected(dataset, datasetdir, outdir, run,
         raise ValueError("You need first to train the model.")
     checkpoints_dir = os.path.join(expdir, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
-        flags_file, checkpoints_dir)
+        flags_file, checkpoints_dir, datasetdir=datasetdir,
+        outdir=outdir)
 
     clinical_names = np.load(
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
@@ -1265,7 +1405,8 @@ def daa_plot_score_metric(dataset, datasetdir, outdir, run, score, metric,
         raise ValueError("You need first to train the model.")
     checkpoints_dir = os.path.join(expdir, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
-        flags_file, checkpoints_dir)
+        flags_file, checkpoints_dir, datasetdir=datasetdir,
+        outdir=outdir)
 
     clinical_names = np.load(
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)
@@ -1402,7 +1543,8 @@ def daa_plot_score_metric_strongest(dataset, datasetdir, outdir, run, score,
         raise ValueError("You need first to train the model.")
     checkpoints_dir = os.path.join(expdir, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
-        flags_file, checkpoints_dir)
+        flags_file, checkpoints_dir, datasetdir=datasetdir,
+        outdir=outdir)
 
     clinical_names = np.load(
         os.path.join(datasetdir, "clinical_names.npy"), allow_pickle=True)

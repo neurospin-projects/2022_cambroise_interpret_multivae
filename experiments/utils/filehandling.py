@@ -18,7 +18,7 @@ def get_str_experiments(flags):
 
 
 def create_dir_structure_testing(exp):
-    flags = exp.flags;
+    flags = exp.flags
     for k, label_str in enumerate(exp.labels):
         dir_gen_eval_label = os.path.join(flags.dir_gen_eval, label_str)
         create_dir(dir_gen_eval_label)
@@ -32,7 +32,7 @@ def create_dir_structure(flags, train=True):
         flags.dir_experiment_run = os.path.join(flags.dir_experiment, str_experiments)
         flags.str_experiment = str_experiments
     else:
-        flags.dir_experiment_run = flags.dir_experiment;
+        flags.dir_experiment_run = os.path.join(flags.dir_experiment, flags.str_experiment)
 
     #print(flags.dir_experiment_run)
     if train:
@@ -69,12 +69,12 @@ def create_dir_structure(flags, train=True):
         create_dir(flags.dir_inference)
 
     if flags.dir_fid is None:
-        flags.dir_fid = flags.dir_experiment_run;
+        flags.dir_fid = flags.dir_experiment_run
     elif not train:
-        flags.dir_fid = os.path.join(flags.dir_experiment_run, 'fid_eval');
+        flags.dir_fid = os.path.join(flags.dir_experiment_run, 'fid_eval')
         if not os.path.exists(flags.dir_fid):
-            os.makedirs(flags.dir_fid);
-    flags.dir_gen_eval_fid = os.path.join(flags.dir_fid, 'fid');
+            os.makedirs(flags.dir_fid)
+    flags.dir_gen_eval_fid = os.path.join(flags.dir_fid, 'fid')
     create_dir(flags.dir_gen_eval_fid)
 
     flags.dir_plots = os.path.join(flags.dir_experiment_run, 'plots')
@@ -91,4 +91,4 @@ def create_dir_structure(flags, train=True):
     flags.dir_cond_gen = os.path.join(flags.dir_plots, 'cond_gen')
     if train:
         create_dir(flags.dir_cond_gen)
-    return flags;
+    return flags

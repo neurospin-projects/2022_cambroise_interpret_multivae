@@ -22,8 +22,8 @@ from color_utils import (print_title, print_subtitle, print_text)
 def analyze_avatars(dataset, datasetdir, outdir, run, n_validation=5,
                     n_samples=200, n_subjects=50,
                     M=1000, reg_method="hierarchical",
-                    sampling_strategy="likelihood", sample_latents=True,
-                    val_step=0, seed=1037, n_subjects_to_plot=5):
+                    sampling="likelihood", sample_latents=True,
+                    model_num=0, val_step=0, seed=1037, n_subjects_to_plot=5):
     # Files paths
     rois_file = os.path.join(datasetdir, "rois_data.npy")
     rois_subjects_file = os.path.join(datasetdir, "rois_subjects.npy")
@@ -38,12 +38,14 @@ def analyze_avatars(dataset, datasetdir, outdir, run, n_validation=5,
         raise ValueError("You need first to train the model.")    
     checkpoints_dir = os.path.join(outdir, run, "checkpoints")
     experiment, flags = MultimodalExperiment.get_experiment(
-        flags_file, checkpoints_dir)
+        flags_file, checkpoints_dir, datasetdir=datasetdir,
+        outdir=outdir)
 
     params = SimpleNamespace(
         n_validation=n_validation, n_subjects=n_subjects, M=M,
         n_samples=n_samples, reg_method=reg_method,
-        sampling=sampling_strategy, sample_latents=sample_latents)
+        sampling=sampling, sample_latents=sample_latents,
+        seed=seed)
     name = "_".join(["_".join([key, str(val)])
                      for key, val in params.__dict__.items()])
     resdir = os.path.join(outdir, run, "daa", name)
@@ -65,9 +67,9 @@ def analyze_avatars(dataset, datasetdir, outdir, run, n_validation=5,
     scores = np.load(sampled_scores_file)
     metadata = np.load(metadata_file, allow_pickle=True)
 
-    da = da[val_step]
-    scores = scores[val_step]
-    metadata = metadata[val_step]
+    da = da[model_num, val_step]
+    scores = scores[model_num, val_step]
+    metadata = metadata[model_num, val_step]
     print(da.shape)
     print(scores.shape)
     print(metadata.shape)
@@ -77,23 +79,33 @@ def analyze_avatars(dataset, datasetdir, outdir, run, n_validation=5,
 
     # scaled_clinical_values = experiment.scalers["clinical"].inverse_transform(clinical_data)
     plt.rcParams.update({'font.size': 20, "font.family": "serif"})
-    for score_idx in range(len(clinical_names)):
-        plt.figure()
-        for idx, subj_idx in enumerate(subj_indices):
-            sampled_scores = scores[subj_idx]
-            true_sampled_scores = experiment.scalers["clinical"].inverse_transform(sampled_scores)[:, score_idx]
-            sns.kdeplot(true_sampled_scores, color=list(colors.TABLEAU_COLORS)[idx])
-            
-            clinical_subj_idx = clinical_subjects.tolist().index(metadata[subj_idx, 0])
-            plt.axvline(clinical_data[clinical_subj_idx, score_idx], color=list(colors.TABLEAU_COLORS)[idx])
-            plt.title(short_clinical_names[dataset][clinical_names[score_idx]])
-            plt.tight_layout()
+    plot_score_hist = False
+    if plot_score_hist:
+        for score_idx in range(len(clinical_names)):
+            plt.figure()
+            for idx, subj_idx in enumerate(subj_indices):
+                sampled_scores = scores[subj_idx]
+                true_sampled_scores = experiment.scalers[model_num]["clinical"].inverse_transform(sampled_scores)[:, score_idx]
+                sns.kdeplot(true_sampled_scores, color=list(colors.TABLEAU_COLORS)[idx])
+                
+                clinical_subj_idx = clinical_subjects.tolist().index(metadata[subj_idx, 0])
+                plt.axvline(clinical_data[clinical_subj_idx, score_idx], color=list(colors.TABLEAU_COLORS)[idx])
+                plt.title(short_clinical_names[dataset][clinical_names[score_idx]])
+                plt.tight_layout()
 
     
-    selected_scores = ["SRS_Total", "CBCL_AP", "SDQ_Hyperactivity", "ARI_P_Total_Score"]
+    selected_scores = ["SDQ_Hyperactivity", "SRS_Total"]#, "CBCL_AP", "SDQ_Hyperactivity", "ARI_P_Total_Score"]
     selected_scores = [clinical_names.tolist().index(score) for score in selected_scores]
-    selected_rois = np.random.randint(len(rois_names), size=3)
-    fig, axes = plt.subplots(len(selected_scores), len(selected_rois), sharey=True, figsize=(5 * len(selected_rois), 3 * len(selected_scores)))
+    # selected_rois = np.random.randint(len(rois_names), size=3)
+    selected_rois = [roi_idx for roi_idx, roi in enumerate(rois_names)
+                     if 
+                        (roi.endswith("area") and "cingul" in roi and
+                         "rh" in roi and "Post" in roi and "Mid" in roi) or
+                        (roi.endswith("thickness") and "Pole" in roi and "occ" in roi)]
+    print(len(selected_rois))
+    fig_width = 15
+    fig, axes = plt.subplots(len(selected_scores), len(selected_rois), sharey=True,
+                             figsize=(fig_width, 1/2 * fig_width))
     for idx, score_idx in enumerate(selected_scores):
         for roi_num, roi_idx in enumerate(selected_rois):
             # if score_idx == selected_scores[0]:
@@ -101,7 +113,8 @@ def analyze_avatars(dataset, datasetdir, outdir, run, n_validation=5,
                                        da[subj_indices, score_idx, :, roi_idx].flatten(),
                                        c=np.repeat(np.arange(n_subjects_to_plot)[:, np.newaxis], n_samples, axis=1).flatten())
             if idx == 0:
-                axes[idx, roi_num].set_title(rois_names[roi_idx])
+                roi_name = rois_names[roi_idx].rsplit("_", 1)[0]
+                axes[idx, roi_num].set_title(roi_name)
                 # axes[roi_idx].set_title(roi_name)
             if roi_num == 0:
                 axes[idx, roi_num].set_ylabel(short_clinical_names[dataset][clinical_names[score_idx]])
@@ -112,7 +125,7 @@ def analyze_avatars(dataset, datasetdir, outdir, run, n_validation=5,
 def assess_robustness(dataset, datasetdir, outdir, run, n_validation=5,
                      n_samples=200, n_subjects=50,
                      M=1000, reg_method="hierarchical",
-                     sampling_strategy="likelihood", sample_latents=True,
+                     sampling="likelihood", sample_latents=True,
                      seed=1037, n_models_to_plot=5):
     
     clinical_file = os.path.join(datasetdir, "clinical_names.npy")
@@ -121,7 +134,7 @@ def assess_robustness(dataset, datasetdir, outdir, run, n_validation=5,
     params = SimpleNamespace(
         n_validation=n_validation, n_subjects=n_subjects, M=M,
         n_samples=n_samples, reg_method=reg_method,
-        sampling=sampling_strategy, sample_latents=sample_latents,
+        sampling=sampling, sample_latents=sample_latents,
         seed=seed)
 
     name = "_".join(["_".join([key, str(val)])
@@ -224,7 +237,7 @@ def univariate_tests(dataset, datasetdir, continuous_covs=[],
                      categorical_covs=[], scores=None, metrics=["thickness"],
                      rescaled=True):
 
-    from plotting import plot_areas, plot_coefs
+    from plotting import plot_areas, plot_coefs, plot_areas_signs
     from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit, MultilabelStratifiedKFold
     if type(continuous_covs) not in (list, tuple):
         continuous_covs = [continuous_covs]
@@ -362,6 +375,8 @@ def univariate_tests(dataset, datasetdir, continuous_covs=[],
                 color_name = "Alphabet"
             print("Number of significative rois in thickness for {} : ".format(score), len(areas))
             plt.rcParams.update({'font.size': 20, "font.family": "serif"})
-            plot_areas(areas, np.arange(len(areas)) + 0.01, color_name=color_name)
-            plot_coefs(areas, values, color_name=color_name)
+            signs = (values >= 0).astype(int) 
+            print(f"Number of significative rois in {metric} for {score} : {len(areas)}")
+            fig = plot_areas_signs(areas, signs + 0.01)
+            fig.suptitle(f"Associations for {score} in {metric}")
     plt.show()

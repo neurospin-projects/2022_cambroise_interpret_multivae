@@ -65,6 +65,8 @@ def make_regression(df, x_name, y_name, other_cov_names=[], groups_name=None,
     elif method == "mixed":
         est = sm.MixedLM.from_formula(formula, data=df, groups=groups_name)
     elif method == "hierarchical":
+        if x_name == "1":
+            x_name = "Intercept"
         lv1 = [[group_lab, sm.OLS.from_formula(formula, group_df).fit().params[x_name]]
                for group_lab, group_df in df.groupby(groups_name, sort=False)]
         lv1 = pd.DataFrame(lv1, columns=[groups_name, 'beta'])

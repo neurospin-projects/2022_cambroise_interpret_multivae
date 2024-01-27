@@ -22,6 +22,7 @@ from multimodal_cohort.networks.VAE import VAE
 from multimodal_cohort.networks.networks import Encoder, Decoder, SurfaceEncoder, SurfaceDecoder
 
 from utils.BaseExperiment import BaseExperiment
+from utils.filehandling import create_dir_structure
 
 class Residualizer:
     def __init__(self, by_continuous, by_categorical):
@@ -91,8 +92,13 @@ class MultimodalExperiment(BaseExperiment):
         self.labels = ['ASD']
     
     @classmethod
-    def get_experiment(cls, flags_file, checkpoints_dir, load_epoch=None):
+    def get_experiment(cls, flags_file, checkpoints_dir, load_epoch=None,
+                       datasetdir=None, outdir=None):
         flags = torch.load(flags_file)
+        if datasetdir is not None:
+            flags.datasetdir = datasetdir
+        if outdir is not None:
+            flags.dir_experiment = outdir
         if not "num_models" in vars(flags):
             flags.num_models = 1
         if not "learn_output_covmatrix" in vars(flags):
@@ -103,6 +109,7 @@ class MultimodalExperiment(BaseExperiment):
             flags.use_surface = False
         use_cuda = torch.cuda.is_available()
         flags.device = torch.device("cuda" if use_cuda else "cpu")
+        flags = create_dir_structure(flags, train=False)
         experiment = MultimodalExperiment(flags)
         for model_idx in range(flags.num_models):
             model = experiment.models
